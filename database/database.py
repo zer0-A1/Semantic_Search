@@ -62,12 +62,19 @@ class Data(Base):
     Filetype = Column(String, nullable = False)
     Score = Column(Float)
     
-class Vector(Base):
+class VectorDB(Base):
     __tablename__ = "VectorDB"
     id = Column(String, primary_key=True, index=True)
     File_id = Column(String, ForeignKey("Database.id"))
     embedding = Column(Vector(1536))
     metadata_json = Column(JSON)
+    
+class Feedback(Base):
+    __tablename__ = "Feedback"
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    query = Column(String, nullable=False)
+    result_id = Column(String, ForeignKey("VectorDB.id"))
+    action_type = Column(String, nullable=False)
     
 async def init_db():
     async with engine.begin() as conn:
