@@ -67,7 +67,7 @@ class Vector(Base):
     id = Column(String, primary_key=True, index=True)
     File_id = Column(String, ForeignKey("Database.id"))
     embedding = Column(Vector(1536))
-    metadata = Column(JSON)
+    metadata_json = Column(JSON)
     
 async def init_db():
     async with engine.begin() as conn:
