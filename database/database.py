@@ -54,27 +54,52 @@ async_session = sessionmaker(engine,
 Base = declarative_base()
 
 
-class Data(Base):
-    __tablename__ = "Database"
+class CompanyData(Base):
+    __tablename__ = "CompanyData"
 
     id = Column(String, primary_key=True, index=True)
-    Filename = Column(String, nullable=False)
-    Filetype = Column(String, nullable = False)
+    CompanyName_CH = Column(String, nullable=False)
+    CompanyName_EN = Column(String, nullable=False)
+    Enterprise_Number = Column(String, nullable=False, unique=True)
+    Industry_category = Column(String, nullable=False)
+    Supplier_evaluation_information = Column(JSON)
+    Phhone_Number = Column(String)
+    Address = Column(String)
+    Website = Column(String)
+    Email = Column(String)
+    Keywords = Column(JSON)
     Score = Column(Float)
     
 class VectorDB(Base):
     __tablename__ = "VectorDB"
     id = Column(String, primary_key=True, index=True)
-    File_id = Column(String, ForeignKey("Database.id"))
+    filter = Column(JSON)
     embedding = Column(Vector(1536))
     metadata_json = Column(JSON)
+    
+class SearchQuery(Base):
+    __tablename__ = "SearchQuery"
+    id = Column(String, primary_key=True, index=True)
+    query = Column(String, nullable=False)
+    top_k = Column(Integer, nullable=False)
+    filter = Column(JSON)
+    
+class Result(Base):
+    __tablename__ = "Result"
+    id = Column(String, primary_key=True, index=True)
+    query_id = Column(String, ForeignKey("SearchQuery.id"))
+    result = Column(String, ForeignKey("VectorDB.id"))
+    rank = Column(Integer, nullable=False)
+    score = Column(Float, nullable=False)
     
 class Feedback(Base):
     __tablename__ = "Feedback"
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    query = Column(String, nullable=False)
-    result_id = Column(String, ForeignKey("VectorDB.id"))
+    query_id = Column(String, ForeignKey("SearchQuery.id"))
+    result_id = Column(String, ForeignKey("Result.id"))
+    
     action_type = Column(String, nullable=False)
+    timestamp = Column(String, nullable=False)
     
 async def init_db():
     async with engine.begin() as conn:
