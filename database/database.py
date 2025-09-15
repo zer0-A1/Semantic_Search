@@ -6,7 +6,6 @@ import os
 from dotenv import load_dotenv
 from urllib.parse import urlparse, parse_qs
 from typing import AsyncGenerator
-from sqlalchemy.orm import relationship
 
 load_dotenv()
 
@@ -38,10 +37,7 @@ engine = create_async_engine(
     clean_url,
     echo=True,
     connect_args={
-        "ssl": "require",  # Enable SSL for the connection
-        "prepared_statement_cache_size":
-        0,  # Disable prepared statement caching
-    },
+        "ssl": "require"},  # Enable SSL for the connectio    },
     pool_size=5,  # Set a reasonable pool size
     max_overflow=10,  # Allow some overflow connections
     pool_timeout=30,  # Timeout for getting a connection from the pool
@@ -126,10 +122,10 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
 
     # Clear cached statements outside of transaction
-    await clear_statement_cache()
+    # await clear_statement_cache()
 
 
-async def clear_statement_cache():
+# async def clear_statement_cache():
     """Clear prepared statement cache to avoid cached statement errors."""
     try:
         # Invalidate all connections in the pool
@@ -162,46 +158,3 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise  # Re-raise the exception so FastAPI can handle it
 
-
-async def save_search_query_and_results(query_text: str, filters: str,
-                                        top_k: int, results: list,
-                                        vector_ids: list) -> str:
-    """Save search query and its results to the database."""
-    import uuid
-    from datetime import datetime
-
-    query_id = str(uuid.uuid4())
-    created_at = datetime.now().isoformat()
-
-    async for session in get_session():
-        try:
-            # Save the search query
-            search_query = SearchQuery(id=query_id,
-                                       query_text=query_text,
-                                       filters=filters,
-                                       top_k=top_k,
-                                       created_at=created_at)
-            session.add(search_query)
-
-            # Save each result
-            for rank, (result,
-                       vector_id) in enumerate(zip(results, vector_ids), 1):
-                search_result = SearchResult(
-                    id=str(uuid.uuid4()),
-                    query_id=query_id,
-                    company=result.company,
-                    product=result.product,
-                    completeness_score=result.completeness_score,
-                    semantic_score=result.semantic_score,
-                    doc_status=result.doc_status,
-                    total_score=result.total_score,
-                    rank=rank,
-                    vector_id=vector_id)
-                session.add(search_result)
-
-            await session.commit()
-            return query_id
-
-        except Exception as e:
-            await session.rollback()
-            raise e
