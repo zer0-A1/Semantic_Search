@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: semantic-search-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 4 --worker-class uvicorn.workers.UvicornWorker --timeout 30 --access-logfile - --error-logfile -
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: WEB_CONCURRENCY
+        value: 4
+      - key: ENVIRONMENT
+        value: production

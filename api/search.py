@@ -1,6 +1,6 @@
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query
-from database.database import VectorDB, get_session, clear_statement_cache, save_search_query_and_results
+from database.database import VectorDB, get_session, SearchQuery
 from database.schemas import SearchRequest, SearchResult
 from sqlalchemy import select, or_
 from typing import List, Dict, Any
@@ -8,6 +8,8 @@ import openai
 import os
 from dotenv import load_dotenv
 import re
+import uuid
+from datetime import datetime
 
 load_dotenv()
 
@@ -178,11 +180,11 @@ async def filter_vectordb_by_filters(
                     print(f"Database query error (attempt {attempt + 1}): {e}")
 
                     # If it's a cached statement error, clear cache and retry
-                    if "InvalidCachedStatementError" in str(e):
-                        await clear_statement_cache()
-                        break  # Break out of session loop to retry
-                    else:
-                        raise e  # Re-raise if it's a different error
+                    # if "InvalidCachedStatementError" in str(e):
+                    #     await clear_statement_cache()
+                    #     break  # Break out of session loop to retry
+                    # else:
+                    #     raise e  # Re-raise if it's a different error
 
         except Exception as e:
             print(f"Session error (attempt {attempt + 1}): {e}")
@@ -639,3 +641,46 @@ async def get_search_results(query_id: str):
     except Exception as e:
         raise HTTPException(status_code=500,
                             detail=f"Failed to get search results: {str(e)}")
+
+
+async def save_search_query_and_results(query_text: str, filters: str,
+                                        top_k: int, results: list,
+                                        vector_ids: list) -> str:
+    """Save search query and its results to the database."""
+
+
+    query_id = str(uuid.uuid4())
+    created_at = datetime.now().isoformat()
+
+    async for session in get_session():
+        try:
+            # Save the search query
+            search_query = SearchQuery(id=query_id,
+                                       query_text=query_text,
+                                       filters=filters,
+                                       top_k=top_k,
+                                       created_at=created_at)
+            session.add(search_query)
+
+            # Save each result
+            for rank, (result,
+                       vector_id) in enumerate(zip(results, vector_ids), 1):
+                search_result = SearchResult(
+                    id=str(uuid.uuid4()),
+                    query_id=query_id,
+                    company=result.company,
+                    product=result.product,
+                    completeness_score=result.completeness_score,
+                    semantic_score=result.semantic_score,
+                    doc_status=result.doc_status,
+                    total_score=result.total_score,
+                    rank=rank,
+                    vector_id=vector_id)
+                session.add(search_result)
+
+            await session.commit()
+            return query_id
+
+        except Exception as e:
+            await session.rollback()
+            raise e
