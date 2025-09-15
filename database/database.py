@@ -36,8 +36,7 @@ if not clean_url.startswith("postgresql+asyncpg://"):
 engine = create_async_engine(
     clean_url,
     echo=True,
-    connect_args={
-        "ssl": "require"},  # Enable SSL for the connectio    },
+    connect_args={"ssl": "require"},  # Enable SSL for the connectio    },
     pool_size=5,  # Set a reasonable pool size
     max_overflow=10,  # Allow some overflow connections
     pool_timeout=30,  # Timeout for getting a connection from the pool
@@ -125,26 +124,21 @@ async def init_db():
     # await clear_statement_cache()
 
 
-# async def clear_statement_cache():
+async def clear_statement_cache():
     """Clear prepared statement cache to avoid cached statement errors."""
     try:
-        # Invalidate all connections in the pool
-        engine.dispose()
+        # Simply dispose and recreate the engine - this clears all caches
+        await engine.dispose()
 
         # Wait a moment for connections to close
         import asyncio
         await asyncio.sleep(0.1)
 
-        # Clear cache outside of transaction (DISCARD ALL cannot run in transaction)
-        async with engine.connect() as conn:
-            await conn.execute(text("DISCARD ALL"))
-            await conn.commit()
-
     except Exception as e:
         print(f"Error clearing statement cache: {e}")
         # If clearing fails, at least dispose the engine to force new connections
         try:
-            engine.dispose()
+            await engine.dispose()
         except:
             pass
 
@@ -157,4 +151,3 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise  # Re-raise the exception so FastAPI can handle it
-
