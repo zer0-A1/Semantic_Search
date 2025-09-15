@@ -14,12 +14,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Create FastAPI app with production settings
+# Enable docs unless explicitly disabled
+enable_docs = os.getenv("DISABLE_DOCS", "false").lower() != "true"
+
 app = FastAPI(
     title="Semantic Search API",
     description="AI-powered semantic search for company data",
     version="1.0.0",
-    docs_url="/docs" if os.getenv("ENVIRONMENT") != "production" else None,
-    redoc_url="/redoc" if os.getenv("ENVIRONMENT") != "production" else None,
+    docs_url="/docs" if enable_docs else None,
+    redoc_url="/redoc" if enable_docs else None,
 )
 
 # Include routers
