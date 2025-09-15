@@ -1,24 +1,12 @@
 from fastapi import APIRouter, HTTPException, Query
 from database.database import Feedback, get_session
+from database.schemas import FeedbackRequest, FeedbackResponse
 from sqlalchemy import select
 from typing import Optional
 import uuid
 from datetime import datetime
-from pydantic import BaseModel
 
 router = APIRouter()
-
-
-class FeedbackRequest(BaseModel):
-    query_id: str
-    result_id: str
-    action_type: str  # "keep", "reject", "compare"
-
-
-class FeedbackResponse(BaseModel):
-    status: str  # "success" or "failure"
-    message: str
-
 
 @router.post("/feedback", response_model=FeedbackResponse)
 async def submit_feedback(feedback_request: FeedbackRequest):

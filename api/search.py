@@ -1,45 +1,17 @@
-import pandas as pd
-import uuid
-import json
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query
-from database.database import CompanyData, VectorDB, async_session, get_session, clear_statement_cache, save_search_query_and_results
-from database.schemas import SearchQuery
-from sqlalchemy import select, func, and_, or_
-from typing import List, Dict, Any, Optional
+from database.database import VectorDB, get_session, clear_statement_cache, save_search_query_and_results
+from database.schemas import SearchRequest, SearchResult
+from sqlalchemy import select, or_
+from typing import List, Dict, Any
 import openai
 import os
 from dotenv import load_dotenv
-from datetime import datetime, date
 import re
-from pgvector.sqlalchemy import Vector
-from pydantic import BaseModel
 
 load_dotenv()
 
 router = APIRouter()
-
-
-class SearchRequest(BaseModel):
-    query_text: str
-    filters: str
-    top_k: int = 5
-
-
-# class NumericGap(BaseModel):
-#     lead_time: Optional[str] = None
-#     quality: Optional[str] = None
-#     capacity: Optional[str] = None
-
-
-class SearchResult(BaseModel):
-    company: str
-    product: Optional[str] = None
-    completeness_score: int
-    semantic_score: float
-    # numeric_gap: NumericGap
-    doc_status: str
-    total_score: int
 
 
 def parse_filters_string(filters_str: str) -> Dict[str, List[str]]:
@@ -650,19 +622,17 @@ async def get_search_results(query_id: str):
                     "top_k": query.top_k,
                     "created_at": query.created_at
                 },
-                "results": [
-                    {
-                        "id": result.id,
-                        "company": result.company,
-                        "product": result.product,
-                        "completeness_score": result.completeness_score,
-                        "semantic_score": result.semantic_score,
-                        "doc_status": result.doc_status,
-                        "total_score": result.total_score,
-                        "rank": result.rank,
-                        "vector_id": result.vector_id
-                    } for result in results
-                ]
+                "results": [{
+                    "id": result.id,
+                    "company": result.company,
+                    "product": result.product,
+                    "completeness_score": result.completeness_score,
+                    "semantic_score": result.semantic_score,
+                    "doc_status": result.doc_status,
+                    "total_score": result.total_score,
+                    "rank": result.rank,
+                    "vector_id": result.vector_id
+                } for result in results]
             }
     except HTTPException:
         raise
