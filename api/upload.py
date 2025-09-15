@@ -10,7 +10,7 @@ import io
 import openai
 import os
 from dotenv import load_dotenv
-from datetime import datetime, date
+from datetime import date
 import numpy as np
 
 load_dotenv()
@@ -79,6 +79,7 @@ def calculate_product_score(row: pd.Series, industry_category: str) -> float:
 async def upload_file(file: UploadFile = File(...)):
     """
     Upload Excel or CSV file containing company or product data.
+    Automatically updates VectorDB for product data.
     
     Company Data: File must contain a column named "公司名稱" (Company Name).
     Product Data: File must contain an industry category column (e.g., '產業別', 'industry_category').
@@ -219,6 +220,7 @@ async def process_company_data(data: pd.DataFrame, file_id: str) -> int:
 async def process_product_data(data: pd.DataFrame, file_id: str) -> int:
     """
     Process product data from DataFrame, classify by industry category (產業別), and create embeddings.
+    Updates existing VectorDB entries or creates new ones as needed.
     Returns the number of industry groups processed.
     """
     # Group data by industry category (產業別)
@@ -242,9 +244,7 @@ async def process_product_data(data: pd.DataFrame, file_id: str) -> int:
     industry_groups = data.groupby(industry_col)
     groups_processed = 0
 
-    # Process all groups first, then commit in batches
-    vector_entries = []
-
+    # Process each group and update VectorDB
     for industry_category, group_data in industry_groups:
         # Calculate scores for each record in the group
         scores = []
@@ -271,32 +271,55 @@ async def process_product_data(data: pd.DataFrame, file_id: str) -> int:
             "individual_scores": [float(s) for s in scores],
             "columns": list(group_data.columns),
             "data_sample":
-            group_data.head(3).to_dict('records')  # First 3 records as sample
+            group_data.head(3).to_dict('records'),  # First 3 records as sample
+            "last_updated": pd.Timestamp.now().isoformat()
         }
 
-        # Create VectorDB entry
-        vector_entry = VectorDB(id=str(uuid.uuid4()),
-                                filter=str(industry_category),
-                                embedding=embedding,
-                                metadata_json=metadata)
-
-        vector_entries.append(vector_entry)
+        # Update or create VectorDB entry
+        await update_or_create_vector_entry(industry_category, embedding,
+                                            metadata)
         groups_processed += 1
 
-    # Now commit all entries in a single transaction
+    return groups_processed
+
+
+async def update_or_create_vector_entry(industry_category: str,
+                                        embedding: List[float],
+                                        metadata: dict):
+    """
+    Update existing VectorDB entry for the industry category or create a new one.
+    This ensures VectorDB is always up-to-date with the latest data.
+    """
     async for session in get_session():
         try:
-            for vector_entry in vector_entries:
-                session.add(vector_entry)
+            # Check if entry exists for this industry category
+            stmt = select(VectorDB).where(VectorDB.filter == industry_category)
+            result = await session.execute(stmt)
+            existing_entry = result.scalar_one_or_none()
 
-            # Commit all changes
+            if existing_entry:
+                # Update existing entry
+                existing_entry.embedding = embedding
+                existing_entry.metadata_json = metadata
+                print(
+                    f"Updated VectorDB entry for industry: {industry_category}"
+                )
+            else:
+                # Create new entry
+                vector_entry = VectorDB(id=str(uuid.uuid4()),
+                                        filter=industry_category,
+                                        embedding=embedding,
+                                        metadata_json=metadata)
+                session.add(vector_entry)
+                print(
+                    f"Created new VectorDB entry for industry: {industry_category}"
+                )
+
             await session.commit()
 
         except Exception as e:
             await session.rollback()
             raise e
-
-    return groups_processed
 
 
 def create_product_text_content(industry_category: str,
@@ -338,3 +361,157 @@ async def generate_embedding(text: str) -> List[float]:
     except Exception as e:
         raise HTTPException(status_code=500,
                             detail=f"Failed to generate embedding: {str(e)}")
+
+
+@router.post("/vectordb/refresh")
+async def refresh_vectordb():
+    """
+    Manually refresh all VectorDB entries by regenerating embeddings.
+    This can be useful if you want to update all existing entries with new embeddings.
+    """
+    try:
+        async for session in get_session():
+            # Get all existing VectorDB entries
+            stmt = select(VectorDB)
+            result = await session.execute(stmt)
+            vector_entries = result.scalars().all()
+
+            updated_count = 0
+            for entry in vector_entries:
+                try:
+                    # Regenerate embedding for existing text content
+                    metadata = entry.metadata_json or {}
+                    industry_category = entry.filter
+
+                    # Recreate text content from metadata
+                    text_content = f"Industry Category: {industry_category}"
+                    if 'average_score' in metadata:
+                        text_content += f" | Average Score: {metadata['average_score']:.2f}"
+                    if 'data_sample' in metadata and metadata['data_sample']:
+                        # Add sample data to text content
+                        sample_texts = []
+                        for sample in metadata[
+                                'data_sample'][:3]:  # First 3 samples
+                            for key, value in sample.items():
+                                if isinstance(value, str) and value.strip():
+                                    sample_texts.append(f"{key}: {value}")
+                        if sample_texts:
+                            text_content += " | " + " | ".join(sample_texts)
+
+                    # Generate new embedding
+                    new_embedding = await generate_embedding(text_content)
+
+                    # Update entry
+                    entry.embedding = new_embedding
+                    metadata['last_refreshed'] = pd.Timestamp.now().isoformat()
+                    entry.metadata_json = metadata
+
+                    updated_count += 1
+
+                except Exception as e:
+                    print(f"Failed to refresh entry {entry.id}: {e}")
+                    continue
+
+            await session.commit()
+
+        return {
+            "message":
+            f"Successfully refreshed {updated_count} VectorDB entries",
+            "entries_updated": updated_count
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500,
+                            detail=f"Failed to refresh VectorDB: {str(e)}")
+
+
+@router.get("/vectordb/stats")
+async def get_vectordb_stats():
+    """
+    Get statistics about the current VectorDB entries.
+    """
+    try:
+        async for session in get_session():
+            # Get all VectorDB entries
+            stmt = select(VectorDB)
+            result = await session.execute(stmt)
+            vector_entries = result.scalars().all()
+
+            # Calculate statistics
+            total_entries = len(vector_entries)
+            industry_categories = set(entry.filter for entry in vector_entries)
+
+            # Get metadata statistics
+            total_records = 0
+            avg_scores = []
+
+            for entry in vector_entries:
+                metadata = entry.metadata_json or {}
+                if 'record_count' in metadata:
+                    total_records += metadata['record_count']
+                if 'average_score' in metadata:
+                    avg_scores.append(metadata['average_score'])
+
+            avg_score = np.mean(avg_scores) if avg_scores else 0
+
+            return {
+                "total_vector_entries":
+                total_entries,
+                "unique_industry_categories":
+                len(industry_categories),
+                "industry_categories":
+                list(industry_categories),
+                "total_records_represented":
+                total_records,
+                "average_quality_score":
+                round(avg_score, 3),
+                "last_updated_entries": [
+                    {
+                        "industry":
+                        entry.filter,
+                        "last_updated":
+                        entry.metadata_json.get('last_updated', 'Unknown')
+                        if entry.metadata_json else 'Unknown'
+                    } for entry in vector_entries[-5:]  # Last 5 entries
+                ]
+            }
+
+    except Exception as e:
+        raise HTTPException(status_code=500,
+                            detail=f"Failed to get VectorDB stats: {str(e)}")
+
+
+@router.delete("/vectordb/industry/{industry_category}")
+async def delete_vectordb_entry(industry_category: str):
+    """
+    Delete VectorDB entry for a specific industry category.
+    """
+    try:
+        async for session in get_session():
+            # Find and delete the entry
+            stmt = select(VectorDB).where(VectorDB.filter == industry_category)
+            result = await session.execute(stmt)
+            entry = result.scalar_one_or_none()
+
+            if not entry:
+                raise HTTPException(
+                    status_code=404,
+                    detail=
+                    f"No VectorDB entry found for industry: {industry_category}"
+                )
+
+            await session.delete(entry)
+            await session.commit()
+
+            return {
+                "message":
+                f"Successfully deleted VectorDB entry for industry: {industry_category}",
+                "deleted_industry": industry_category
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete VectorDB entry: {str(e)}")
