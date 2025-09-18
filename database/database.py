@@ -53,24 +53,6 @@ async_session = sessionmaker(engine,
 
 Base = declarative_base()
 
-
-class CompanyData(Base):
-    __tablename__ = "CompanyData"
-
-    id = Column(String, primary_key=True, index=True)
-    CompanyName_CH = Column(String, nullable=False)
-    CompanyName_EN = Column(String, nullable=False)
-    Enterprise_Number = Column(String, nullable=False, unique=True)
-    Industry_category = Column(String, nullable=False)
-    Supplier_evaluation_information = Column(JSON)
-    Phhone_Number = Column(String)
-    Address = Column(String)
-    Website = Column(String)
-    Email = Column(String)
-    Keywords = Column(JSON)
-    Score = Column(Float)
-
-
 class VectorDB(Base):
     __tablename__ = "VectorDB"
     id = Column(String, primary_key=True, index=True)

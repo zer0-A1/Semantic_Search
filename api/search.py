@@ -15,12 +15,11 @@ load_dotenv()
 
 router = APIRouter()
 
-
 def parse_filters_string(filters_str: str) -> Dict[str, List[str]]:
     """
     Parse filters string into dictionary format.
     Simple format: "扣件" -> {"industry_category": ["扣件"]}
-    Complex format: "industry:FOOD,FOOD2;country:VN,TH" -> {"industry": ["FOOD", "FOOD2"], "country": ["VN", "TH"]}
+    Complex format: "industry:FOOD,FOOD2" -> {"industry": ["FOOD", "FOOD2"]}
     """
     filters = {}
 
@@ -59,7 +58,7 @@ async def semantic_search(request: SearchRequest):
     - Natural language queries
     - Semantic similarity search
     - Numeric tolerance matching
-    - Multi-factor sorting (Completeness + SemanticSim + NumericFit)
+    - Multi-factor sorting (Completeness + SemanticSim)
     """
     try:
         # Extract parameters from request
@@ -226,12 +225,6 @@ async def semantic_search_within_groups(query: str,
         # Get completeness score from metadata (already calculated in upload.py)
         completeness = metadata.get('average_score', 0.5)
 
-        # Calculate numeric fit
-        # numeric_fit = calculate_numeric_fit_from_metadata(query, metadata)
-
-        # Identify data gaps
-        data_gaps = identify_data_gaps_from_metadata(metadata)
-
         # Determine document status
         doc_status = determine_document_status_from_metadata(metadata)
 
@@ -266,7 +259,6 @@ async def semantic_search_within_groups(query: str,
             "company_name": company_name,
             "product_name": product_name,
             "document_status": doc_status,
-            "data_gaps": data_gaps,
             "completeness_score": completeness,
             "semantic_similarity": similarity,
             # "numeric_fit": numeric_fit,
@@ -358,55 +350,6 @@ def calculate_numeric_fit_from_metadata(query: str,
 
     return best_fit
 
-
-def identify_data_gaps_from_metadata(metadata: Dict[str, Any]) -> List[str]:
-    """Identify data gaps from vector metadata."""
-    gaps = []
-
-    data_sample = metadata.get('data_sample', [])
-    record_count = len(data_sample) if data_sample else metadata.get(
-        'record_count', 0)
-
-    if record_count == 0:
-        gaps.append("No data records")
-
-    # Check if we have enough data in data_sample
-    if data_sample and len(data_sample) > 0:
-        # Check if records have sufficient fields
-        first_record = data_sample[0]
-        required_fields = ['客戶名稱', '問卷編號', '產業別', '整體滿意度']
-        missing_fields = [
-            field for field in required_fields if field not in first_record
-        ]
-        if missing_fields:
-            gaps.append(
-                f"Missing required fields: {', '.join(missing_fields)}")
-
-        # Check data quality scores
-        satisfaction_scores = []
-        for record in data_sample:
-            if '整體滿意度' in record:
-                satisfaction_scores.append(record['整體滿意度'])
-
-        if satisfaction_scores:
-            avg_score = sum(satisfaction_scores) / len(satisfaction_scores)
-            if avg_score < 3.0:  # Assuming 1-5 scale
-                gaps.append("Low satisfaction scores")
-    else:
-        # Fallback to old logic
-        columns = metadata.get('columns', [])
-        if len(columns) < 3:
-            gaps.append("Insufficient data columns")
-
-        individual_scores = metadata.get('individual_scores', [])
-        if individual_scores:
-            avg_score = sum(individual_scores) / len(individual_scores)
-            if avg_score < 0.5:
-                gaps.append("Low data quality scores")
-
-    return gaps
-
-
 def determine_document_status_from_metadata(metadata: Dict[str, Any]) -> str:
     """Determine document status based on expire date."""
     from datetime import datetime, date
@@ -436,102 +379,6 @@ def determine_document_status_from_metadata(metadata: Dict[str, Any]) -> str:
     # Default to valid if no expire date found
     return "有效"
 
-
-# def calculate_numeric_gap(query: str, result: Dict[str, Any]) -> NumericGap:
-#     """Calculate numeric gaps for lead time, quality, and capacity."""
-#     numeric_gap = NumericGap()
-
-#     # Extract numbers from query
-#     query_numbers = re.findall(r'\d+', query)
-
-#     if not query_numbers:
-#         return numeric_gap
-
-#     # Check for lead time mentions
-#     if any(word in query.lower()
-#            for word in ['交期', 'lead', 'time', '天', 'days']):
-#         # Look for lead time in data_sample
-#         metadata = result.get('metadata', {})
-#         data_sample = metadata.get('data_sample', [])
-
-#         if data_sample and len(data_sample) > 0:
-#             first_record = data_sample[0]
-#             if '交期-準時率' in first_record:
-#                 try:
-#                     actual_lead_time = int(first_record['交期-準時率'])
-#                     query_lead_time = int(query_numbers[0])
-#                     gap = actual_lead_time - query_lead_time
-#                     if gap > 0:
-#                         numeric_gap.lead_time = f"+{gap} days"
-#                     elif gap < 0:
-#                         numeric_gap.lead_time = f"{gap} days"
-#                 except:
-#                     pass
-
-#     # Check for quality mentions
-#     if any(word in query.lower() for word in ['品質', 'quality', '分', 'score']):
-#         metadata = result.get('metadata', {})
-#         data_sample = metadata.get('data_sample', [])
-
-#         if data_sample and len(data_sample) > 0:
-#             first_record = data_sample[0]
-#             if '品質-符合規範' in first_record:
-#                 try:
-#                     actual_quality = int(first_record['品質-符合規範'])
-#                     query_quality = int(query_numbers[0])
-#                     gap = actual_quality - query_quality
-#                     if gap > 0:
-#                         numeric_gap.quality = f"+{gap} points"
-#                     elif gap < 0:
-#                         numeric_gap.quality = f"{gap} points"
-#                 except:
-#                     pass
-
-#     # Check for capacity mentions
-
-# #     if any(word in query.lower()
-# #            for word in ['容量', 'capacity', '數量', 'quantity']):
-# #         metadata = result.get('metadata', {})
-# #         if 'data_sample' in metadata:
-# #             # Look for quantity in data sample
-# #             for sample in metadata['data_sample']:
-# #                 if 'quantity' in sample:
-# #                     try:
-# #                         actual_capacity = int(sample['quantity'])
-# #                         query_capacity = int(query_numbers[0])
-# #                         gap = actual_capacity - query_capacity
-# #                         if gap > 0:
-# #                             numeric_gap.capacity = f"+{gap} units"
-# #                         elif gap < 0:
-# #                             numeric_gap.capacity = f"{gap} units"
-# #                         break
-# #                     except:
-# #                         pass
-
-# # Check for capacity mentions
-#     if any(word in query.lower()
-#            for word in ['容量', 'capacity', '數量', 'quantity']):
-#         metadata = result.get('metadata', {})
-#         data_sample = metadata.get('data_sample', [])
-
-#         if data_sample and len(data_sample) > 0:
-#             for record in data_sample:
-#                 if 'quantity' in record:
-#                     try:
-#                         actual_capacity = int(record['quantity'])
-#                         query_capacity = int(query_numbers[0])
-#                         gap = actual_capacity - query_capacity
-#                         if gap > 0:
-#                             numeric_gap.capacity = f"+{gap} units"
-#                         elif gap < 0:
-#                             numeric_gap.capacity = f"{gap} units"
-#                         break
-#                     except:
-#                         pass
-
-#     return numeric_gap
-
-
 async def generate_embedding(text: str) -> List[float]:
     """Generate embedding for the given text using OpenAI API."""
     try:
@@ -545,26 +392,6 @@ async def generate_embedding(text: str) -> List[float]:
     except Exception as e:
         raise HTTPException(status_code=500,
                             detail=f"Failed to generate embedding: {str(e)}")
-
-
-# @router.get("/search/suggestions")
-# async def get_search_suggestions(
-#         query: str = Query(..., description="Partial query for suggestions"),
-#         limit: int = Query(5, description="Number of suggestions to return")):
-#     """Get search suggestions based on partial query."""
-#     try:
-#         # This could be enhanced with actual suggestion logic
-#         suggestions = [
-#             f"{query} 公司", f"{query} 產品", f"{query} 供應商", f"{query} 評鑑",
-#             f"{query} 產業"
-#         ]
-
-#         return {"query": query, "suggestions": suggestions[:limit]}
-
-#     except Exception as e:
-#         raise HTTPException(status_code=500,
-#                             detail=f"Failed to get suggestions: {str(e)}")
-
 
 @router.get("/search/history")
 async def get_search_history(limit: int = Query(

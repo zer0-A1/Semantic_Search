@@ -1,27 +1,49 @@
-# Semantic Search API
+# 🔍 Semantic Search API
 
-A powerful FastAPI-based semantic search application that enables intelligent search across company and product data using OpenAI embeddings and vector similarity search. The system supports natural language queries, advanced filtering, and user feedback collection.
+A powerful FastAPI-based semantic search application that enables intelligent search across company and product data using OpenAI embeddings and vector similarity search. The system supports natural language queries, advanced filtering, and user feedback collection with production-ready deployment on Render.com.
 
-## 🚀 Features
+[![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
+[![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)](https://postgresql.org/)
+[![OpenAI](https://img.shields.io/badge/OpenAI-412991?style=for-the-badge&logo=openai&logoColor=white)](https://openai.com/)
+[![Render](https://img.shields.io/badge/Render-46E3B7?style=for-the-badge&logo=render&logoColor=white)](https://render.com/)
 
-### Core Functionality
+## 🌟 Live Demo
 
-- **Semantic Search**: Natural language search using OpenAI embeddings
-- **Multi-format Data Upload**: Support for Excel (.xlsx, .xls) and CSV files
-- **Advanced Filtering**: Industry category and custom filter support
-- **Vector Database**: PostgreSQL with pgvector extension for efficient similarity search
-- **User Feedback System**: Collect and analyze user interactions with search results
-- **Search History**: Track and retrieve previous search queries
-- **Scoring System**: Multi-factor scoring based on completeness, semantic similarity, and data quality
+**🚀 Production API**: [https://semantic-search-vfez.onrender.com/](https://semantic-search-vfez.onrender.com/)
 
-### Data Types Supported
+- **📚 API Documentation**: [https://semantic-search-vfez.onrender.com/docs](https://semantic-search-vfez.onrender.com/docs)
+- **📖 ReDoc Documentation**: [https://semantic-search-vfez.onrender.com/redoc](https://semantic-search-vfez.onrender.com/redoc)
+- **❤️ Health Check**: [https://semantic-search-vfez.onrender.com/health](https://semantic-search-vfez.onrender.com/health)
 
-- **Company Data**: Company profiles with evaluation information
-- **Product Data**: Product information grouped by industry categories
+## ✨ Features
+
+### 🔍 Core Functionality
+
+- **🧠 Semantic Search**: Natural language search using OpenAI embeddings
+- **📊 Multi-format Data Upload**: Support for Excel (.xlsx, .xls) and CSV files
+- **🎯 Advanced Filtering**: Industry category and custom filter support
+- **🗄️ Vector Database**: PostgreSQL with pgvector extension for efficient similarity search
+- **💬 User Feedback System**: Collect and analyze user interactions with search results
+- **📈 Search History**: Track and retrieve previous search queries
+- **⭐ Scoring System**: Multi-factor scoring based on completeness, semantic similarity, and data quality
+
+### 🚀 Production Features
+
+- **☁️ Cloud Deployment**: Ready for Render.com deployment
+- **🔄 Auto-scaling**: Gunicorn with multiple workers
+- **📊 Monitoring**: Health checks and logging
+- **🔒 Security**: SSL/TLS encryption and secure database connections
+- **📱 API Documentation**: Interactive Swagger UI and ReDoc
+
+### 📁 Data Types Supported
+
+- **🏢 Company Data**: Company profiles with evaluation information
+- **📦 Product Data**: Product information grouped by industry categories
 
 ## 🏗️ Architecture
 
-### Technology Stack
+### 🛠️ Technology Stack
 
 - **Backend**: FastAPI (Python 3.11+)
 - **Database**: PostgreSQL with pgvector extension
@@ -29,8 +51,10 @@ A powerful FastAPI-based semantic search application that enables intelligent se
 - **Data Processing**: Pandas for data manipulation
 - **ORM**: SQLAlchemy with async support
 - **Vector Search**: Cosine similarity with pgvector
+- **Production Server**: Gunicorn with Uvicorn workers
+- **Deployment**: Render.com
 
-### Project Structure
+### 📂 Project Structure
 
 ```
 semantic_search/
@@ -42,121 +66,94 @@ semantic_search/
 │   ├── database.py        # SQLAlchemy models and database setup
 │   └── schemas.py         # Pydantic models for API validation
 ├── app.py                 # FastAPI application entry point
-├── .env                   # Environment variables
+├── start.py               # Production startup script
+├── gunicorn.conf.py       # Gunicorn configuration
+├── Procfile               # Render.com deployment configuration
+├── render.yaml            # Render.com service configuration
+├── requirements.txt       # Python dependencies
+├── .env                   # Environment variables (local)
 └── README.md             # This file
 ```
 
-## 📋 Prerequisites
+## 🚀 Quick Start
+
+### 🐳 One-Click Deploy to Render.com
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+
+1. Click the "Deploy to Render" button above
+2. Connect your GitHub repository
+3. Set environment variables:
+   - `DATABASE_URL`: Your PostgreSQL connection string
+   - `OPENAI_API_KEY`: Your OpenAI API key
+4. Deploy! 🎉
+
+### 🏠 Local Development
+
+#### Prerequisites
 
 - Python 3.11 or higher
 - PostgreSQL 12+ with pgvector extension
 - OpenAI API key
-- pip or conda package manager
 
-## 🛠️ Installation
-
-### 1. Clone the Repository
+#### Installation
 
 ```bash
+# 1. Clone the repository
 git clone <repository-url>
 cd semantic_search
-```
 
-### 2. Create Virtual Environment
-
-```bash
-# Using venv
+# 2. Create virtual environment
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Or using conda
-conda create -n semantic_search python=3.11
-conda activate semantic_search
-```
-
-### 3. Install Dependencies
-
-```bash
+# 3. Install dependencies
 pip install -r requirements.txt
-```
 
-### 4. Database Setup
+# 4. Set up environment variables
+cp .env.example .env
+# Edit .env with your configuration
 
-1. Install PostgreSQL with pgvector extension
-2. Create a database for the application
-3. Set up the connection string in your environment
-
-### 5. Environment Configuration
-
-Create a `.env` file in the project root:
-
-```env
-DATABASE_URL=postgresql://username:password@localhost:5432/database_name
-OPENAI_API_KEY=your_openai_api_key_here
-```
-
-### 6. Initialize Database
-
-```bash
+# 5. Initialize database
 python -c "from database.database import init_db; import asyncio; asyncio.run(init_db())"
-```
 
-## 🚀 Running the Application
-
-### Development Mode
-
-```bash
+# 6. Run the application
 uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Production Mode
-
-```bash
-uvicorn app:app --host 0.0.0.0 --port 8000
-```
-
-The API will be available at `http://localhost:8000`
-
 ## 📚 API Documentation
 
-### Interactive Documentation
+### 🔗 Endpoints Overview
 
-- **Swagger UI**: `http://localhost:8000/docs`
-- **ReDoc**: `http://localhost:8000/redoc`
+| Method   | Endpoint                         | Description                   |
+| -------- | -------------------------------- | ----------------------------- |
+| `GET`    | `/`                              | Root endpoint with API status |
+| `GET`    | `/health`                        | Detailed health check         |
+| `GET`    | `/docs`                          | Interactive Swagger UI        |
+| `GET`    | `/redoc`                         | ReDoc documentation           |
+| `POST`   | `/api/upload`                    | Upload Excel/CSV files        |
+| `POST`   | `/api/search`                    | Perform semantic search       |
+| `GET`    | `/api/search/history`            | Get search history            |
+| `GET`    | `/api/search/results/{query_id}` | Get specific query results    |
+| `POST`   | `/api/feedback`                  | Submit user feedback          |
+| `GET`    | `/api/feedback/query/{query_id}` | Get feedback for query        |
+| `GET`    | `/api/feedback/stats`            | Get feedback statistics       |
+| `DELETE` | `/api/feedback/{feedback_id}`    | Delete feedback               |
 
-### API Endpoints
+### 📖 Usage Examples
 
-#### Upload Endpoints
-
-- **POST** `/api/upload` - Upload Excel/CSV files for processing
-
-#### Search Endpoints
-
-- **POST** `/api/search` - Perform semantic search
-- **GET** `/api/search/history` - Get search history
-- **GET** `/api/search/results/{query_id}` - Get results for specific query
-
-#### Feedback Endpoints
-
-- **POST** `/api/feedback` - Submit user feedback
-- **GET** `/api/feedback/query/{query_id}` - Get feedback for specific query
-- **GET** `/api/feedback/stats` - Get feedback statistics
-- **DELETE** `/api/feedback/{feedback_id}` - Delete specific feedback
-
-## 📖 Usage Examples
-
-### 1. Upload Company Data
+#### 1. Upload Company Data
 
 ```bash
-curl -X POST "http://localhost:8000/api/upload" \
+curl -X POST "https://semantic-search-vfez.onrender.com/api/upload" \
   -H "Content-Type: multipart/form-data" \
   -F "file=@company_data.xlsx"
 ```
 
-### 2. Perform Semantic Search
+#### 2. Perform Semantic Search
 
 ```bash
-curl -X POST "http://localhost:8000/api/search" \
+curl -X POST "https://semantic-search-vfez.onrender.com/api/search" \
   -H "Content-Type: application/json" \
   -d '{
     "query_text": "尋找高品質的扣件供應商",
@@ -165,10 +162,10 @@ curl -X POST "http://localhost:8000/api/search" \
   }'
 ```
 
-### 3. Submit Feedback
+#### 3. Submit Feedback
 
 ```bash
-curl -X POST "http://localhost:8000/api/feedback" \
+curl -X POST "https://semantic-search-vfez.onrender.com/api/feedback" \
   -H "Content-Type: application/json" \
   -d '{
     "query_id": "query-uuid-here",
@@ -179,14 +176,14 @@ curl -X POST "http://localhost:8000/api/feedback" \
 
 ## 🔍 Search Features
 
-### Filter Formats
+### 🎯 Filter Formats
 
 The search supports two filter formats:
 
 1. **Simple Format**: `"扣件"` → Filters by industry category
 2. **Complex Format**: `"industry:FOOD,FOOD2;country:VN,TH"` → Multiple filter criteria
 
-### Scoring System
+### ⭐ Scoring System
 
 Results are scored based on:
 
@@ -194,7 +191,7 @@ Results are scored based on:
 - **Semantic Similarity (40%)**: Vector similarity to query
 - **Document Status**: Current status of company documents
 
-### Search Capabilities
+### 🔍 Search Capabilities
 
 - Natural language queries in multiple languages
 - Fuzzy matching and tolerance for typos
@@ -204,7 +201,7 @@ Results are scored based on:
 
 ## 📊 Data Models
 
-### Company Data Schema
+### 🏢 Company Data Schema
 
 ```python
 {
@@ -222,7 +219,7 @@ Results are scored based on:
 }
 ```
 
-### Search Request Schema
+### 🔍 Search Request Schema
 
 ```python
 {
@@ -232,7 +229,7 @@ Results are scored based on:
 }
 ```
 
-### Search Result Schema
+### 📈 Search Result Schema
 
 ```python
 {
@@ -245,78 +242,193 @@ Results are scored based on:
 }
 ```
 
-## 🔧 Configuration
+## ⚙️ Configuration
 
-### Database Configuration
+### 🗄️ Database Configuration
 
-The application uses PostgreSQL with the following key settings:
+The application uses PostgreSQL with optimized settings:
 
-- Connection pooling with 5 base connections
-- SSL required for secure connections
-- Prepared statement caching disabled for compatibility
-- Connection recycling every 30 minutes
+- **Connection Pooling**: 5 base connections with 10 max overflow
+- **SSL Required**: Secure connections for production
+- **Connection Recycling**: Every 30 minutes to prevent memory leaks
+- **Pre-ping**: Verifies connections before use
+- **Statement Caching**: Optimized for performance
 
-### OpenAI Configuration
+### 🤖 OpenAI Configuration
 
-- Uses OpenAI's text-embedding-ada-002 model
-- 1536-dimensional embeddings
-- Automatic retry logic for API calls
+- **Model**: text-embedding-ada-002
+- **Dimensions**: 1536-dimensional embeddings
+- **Retry Logic**: Automatic retry for API calls
+- **Rate Limiting**: Built-in rate limit handling
+
+### 🚀 Production Configuration
+
+- **Server**: Gunicorn with Uvicorn workers
+- **Workers**: 4 workers (configurable via `WEB_CONCURRENCY`)
+- **Timeout**: 30 seconds for request handling
+- **Memory Management**: Worker recycling after 1000 requests
+- **Logging**: Structured logging for monitoring
 
 ## 🐛 Troubleshooting
 
-### Common Issues
+### ❌ Common Issues
 
-1. **Database Connection Errors**
+#### 1. Database Connection Errors
 
-   - Verify PostgreSQL is running
-   - Check DATABASE_URL format
-   - Ensure pgvector extension is installed
+```bash
+# Check PostgreSQL status
+sudo systemctl status postgresql
 
-2. **OpenAI API Errors**
+# Verify connection string format
+echo $DATABASE_URL
+# Should be: postgresql://user:password@host:port/database
+```
 
-   - Verify OPENAI_API_KEY is set
-   - Check API key permissions
-   - Monitor API rate limits
+#### 2. OpenAI API Errors
 
-3. **File Upload Issues**
-   - Ensure file format is supported (.csv, .xlsx, .xls)
-   - Check file size limits
-   - Verify required columns are present
+```bash
+# Verify API key
+echo $OPENAI_API_KEY
 
-### Debug Mode
+# Check API key permissions
+curl -H "Authorization: Bearer $OPENAI_API_KEY" \
+  https://api.openai.com/v1/models
+```
 
-Enable debug logging by setting the log level in your environment:
+#### 3. File Upload Issues
+
+- Ensure file format is supported (.csv, .xlsx, .xls)
+- Check file size limits (default: 10MB)
+- Verify required columns are present
+
+#### 4. Render.com Deployment Issues
+
+- Check build logs in Render.com dashboard
+- Verify environment variables are set
+- Ensure `Procfile` is in root directory
+- Check port binding configuration
+
+### 🔧 Debug Mode
+
+Enable debug logging:
 
 ```env
 LOG_LEVEL=DEBUG
+DISABLE_DOCS=false
 ```
+
+### 📊 Health Monitoring
+
+Check application health:
+
+```bash
+# Basic health check
+curl https://semantic-search-vfez.onrender.com/health
+
+# Detailed status
+curl https://semantic-search-vfez.onrender.com/
+```
+
+## 🚀 Deployment
+
+### 🌐 Render.com Deployment
+
+1. **Connect Repository**: Link your GitHub repository
+2. **Set Environment Variables**:
+   - `DATABASE_URL`: PostgreSQL connection string
+   - `OPENAI_API_KEY`: OpenAI API key
+   - `WEB_CONCURRENCY`: Number of workers (optional)
+   - `ENVIRONMENT`: production (optional)
+3. **Deploy**: Render.com will automatically build and deploy
+
+### 🐳 Docker Deployment (Optional)
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY . .
+EXPOSE 8000
+
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:8000", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker"]
+```
+
+### 🔧 Environment Variables
+
+| Variable          | Description                          | Required | Default     |
+| ----------------- | ------------------------------------ | -------- | ----------- |
+| `DATABASE_URL`    | PostgreSQL connection string         | ✅       | -           |
+| `OPENAI_API_KEY`  | OpenAI API key                       | ✅       | -           |
+| `WEB_CONCURRENCY` | Number of Gunicorn workers           | ❌       | 4           |
+| `ENVIRONMENT`     | Environment (production/development) | ❌       | development |
+| `DISABLE_DOCS`    | Disable API documentation            | ❌       | false       |
+| `LOG_LEVEL`       | Logging level                        | ❌       | INFO        |
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+We welcome contributions! Please follow these steps:
+
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
+4. **Push** to the branch (`git push origin feature/amazing-feature`)
+5. **Open** a Pull Request
+
+### 🧪 Development Setup
+
+```bash
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Run tests
+pytest
+
+# Run linting
+flake8 .
+
+# Format code
+black .
+```
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🆘 Support
 
-For support and questions:
+### 📞 Getting Help
 
-- Create an issue in the repository
-- Check the API documentation at `/docs`
-- Review the troubleshooting section above
+- **📚 Documentation**: [https://semantic-search-vfez.onrender.com/docs](https://semantic-search-vfez.onrender.com/docs)
+- **🐛 Issues**: [GitHub Issues](https://github.com/your-repo/issues)
+- **💬 Discussions**: [GitHub Discussions](https://github.com/your-repo/discussions)
+
+### 🔗 Useful Links
+
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [PostgreSQL Documentation](https://www.postgresql.org/docs/)
+- [OpenAI API Documentation](https://platform.openai.com/docs/)
+- [Render.com Documentation](https://render.com/docs)
 
 ## 🔄 Version History
 
 - **v1.0.0**: Initial release with basic semantic search
 - **v1.1.0**: Added feedback system and search history
 - **v1.2.0**: Enhanced filtering and scoring algorithms
+- **v1.3.0**: Production deployment with Gunicorn and Render.com
+- **v1.4.0**: Improved error handling and database optimization
+
+## 🙏 Acknowledgments
+
+- [FastAPI](https://fastapi.tiangolo.com/) for the amazing web framework
+- [OpenAI](https://openai.com/) for the embedding models
+- [PostgreSQL](https://postgresql.org/) and [pgvector](https://github.com/pgvector/pgvector) for vector search
+- [Render.com](https://render.com/) for hosting and deployment
 
 ---
 
-**Note**: This application requires an active internet connection for OpenAI API calls and a properly configured PostgreSQL database with pgvector extension.
+**⚡ Ready to search semantically?** [Try the live API](https://semantic-search-vfez.onrender.com/docs) or [deploy your own](https://render.com/deploy)!
+
+**📝 Note**: This application requires an active internet connection for OpenAI API calls and a properly configured PostgreSQL database with pgvector extension.
