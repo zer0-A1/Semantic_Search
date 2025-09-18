@@ -2,8 +2,7 @@ import pandas as pd
 import uuid
 import json
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from database.database import CompanyData as CompanyDataModel, VectorDB, async_session, get_session
-from database.schemas import CompanyData
+from database.database import VectorDB, async_session, get_session
 from sqlalchemy import select
 from typing import List, Dict, Any
 import io
@@ -16,24 +15,6 @@ import numpy as np
 load_dotenv()
 
 router = APIRouter()
-
-
-def calculate_company_score(row: pd.Series) -> float:
-    """
-    Calculate score for company data.
-    Start with 1.0, minus 0.1 for each empty column.
-    """
-    score = 1.0
-    empty_penalty = 0.1
-
-    # Check each column for empty values
-    for column in row.index:
-        value = row[column]
-        if pd.isna(value) or value == "" or str(value).strip() == "":
-            score -= empty_penalty
-
-    return max(0.0, score)  # Ensure score doesn't go below 0
-
 
 def calculate_product_score(row: pd.Series, industry_category: str) -> float:
     """
@@ -105,117 +86,18 @@ async def upload_file(file: UploadFile = File(...)):
         else:  # Excel files
             data = pd.read_excel(file_io)
 
-        # Check if this is company data or product data
-        if "公司名稱" in data.columns:
-            # Process as company data
-            companies_processed = await process_company_data(data, file_id)
-            return {
-                "message":
-                f"Successfully processed {companies_processed} company records",
-                "file_id": file_id,
-                "records_processed": companies_processed,
-                "data_type": "company"
-            }
-        else:
-            # Process as product data
-            products_processed = await process_product_data(data, file_id)
-            return {
-                "message":
-                f"Successfully processed {products_processed} industry groups with embeddings",
-                "file_id": file_id,
-                "groups_processed": products_processed,
-                "data_type": "product"
-            }
+        products_processed = await process_product_data(data, file_id)
+        return {
+            "message":
+            f"Successfully processed {products_processed} industry groups with embeddings",
+            "file_id": file_id,
+            "groups_processed": products_processed,
+            "data_type": "product"
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500,
                             detail=f"Error processing file: {str(e)}")
-
-
-async def process_company_data(data: pd.DataFrame, file_id: str) -> int:
-    """
-    Process company data from DataFrame and save to database.
-    Returns the number of companies processed.
-    """
-    companies_processed = 0
-
-    # Process all companies first, then commit in batches
-    company_entries = []
-
-    for index, row in data.iterrows():
-        # Calculate company score
-        company_score = calculate_company_score(row)
-
-        # Parse supplier evaluation information from string to dict
-        supplier_eval_str = str(row.get("供應商評鑑資料", ""))
-        supplier_eval_dict = {}
-        if supplier_eval_str and supplier_eval_str != "nan":
-            try:
-                # Parse format like "品質:90, 交期:85, 合規:95, 服務:88"
-                for item in supplier_eval_str.split(", "):
-                    if ":" in item:
-                        key, value = item.split(":", 1)
-                        supplier_eval_dict[key.strip()] = value.strip()
-            except:
-                supplier_eval_dict = {"raw_data": supplier_eval_str}
-
-        # Parse keywords from string to list
-        keywords_str = str(row.get("預設關鍵字", ""))
-        keywords_list = []
-        if keywords_str and keywords_str != "nan":
-            # Split by semicolon and clean up
-            keywords_list = [
-                kw.strip() for kw in keywords_str.split(";") if kw.strip()
-            ]
-
-        # Create company data object
-        company_data = CompanyData(
-            CompanyName_CH=str(row.get("公司名稱", "")),
-            CompanyName_EN=str(row.get("公司英文名稱", "")),
-            Enterprise_Number=str(row.get("企業編號", "")),
-            Industry_category=str(row.get("產業類別", "")),
-            Supplier_evaluation_information=supplier_eval_dict,
-            Phhone_Number=str(row.get("電話", "")),
-            Address=str(row.get("地址", "")),
-            Website=str(row.get("公司網站", "")),
-            Email=str(row.get("E-mail", "")),
-            keywords=keywords_list,
-            Score=company_score)
-
-        # Create database model instance
-        db_company = CompanyDataModel(
-            id=str(uuid.uuid4()),
-            CompanyName_CH=company_data.CompanyName_CH,
-            CompanyName_EN=company_data.CompanyName_EN,
-            Enterprise_Number=company_data.Enterprise_Number,
-            Industry_category=company_data.Industry_category,
-            Supplier_evaluation_information=company_data.
-            Supplier_evaluation_information,
-            Phhone_Number=company_data.Phhone_Number,
-            Address=company_data.Address,
-            Website=company_data.Website,
-            Email=company_data.Email,
-            Keywords=company_data.keywords,
-            Score=company_data.Score)
-
-        company_entries.append(db_company)
-        companies_processed += 1
-
-    # Now commit all entries in a single transaction
-    async for session in get_session():
-        try:
-            for db_company in company_entries:
-                session.add(db_company)
-
-            # Commit all changes
-            await session.commit()
-
-        except Exception as e:
-            await session.rollback()
-            raise e
-
-    return companies_processed
-
 
 async def process_product_data(data: pd.DataFrame, file_id: str) -> int:
     """
