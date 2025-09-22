@@ -597,7 +597,7 @@ async def semantic_search_within_groups(
         doc_status = determine_document_status_from_metadata(metadata)
 
         # Calculate overall score
-        overall_score = (completeness * 0.6 + similarity * 0.4)
+        overall_score = (completeness * 0.54 + similarity * 0.3)
         #  100 * numeric_fit * 0.0)
 
         # Extract company name from data_sample array
@@ -647,7 +647,7 @@ async def semantic_search_within_groups(
                 p2c = metadata.get('product_to_company') or {}
                 matched_company = p2c.get(matched_product)
                 # Apply a boost to overall score to favor exact product matches
-                overall_score += 0.2
+                overall_score += 0.2 * 0.4
 
         # If a metric intent is specified, pick best product in this group
         if metric_intent:
@@ -687,8 +687,28 @@ async def semantic_search_within_groups(
                                 return v
                     return None
 
+                # If a product_code was provided but didn't resolve to an exact
+                # match above, treat it as a prefix filter (e.g., "Q012*"), and
+                # restrict metric aggregation to those products first.
+                filtered_metrics = metrics
+                if product_code:
+                    try:
+                        normalized_query = _normalize_product_code(
+                            product_code)
+                        prefixed = []
+                        for m in metrics:
+                            pid = m.get('product_id') or m.get('product')
+                            if pid and _normalize_product_code(pid).startswith(
+                                    normalized_query):
+                                prefixed.append(m)
+                        if prefixed:
+                            filtered_metrics = prefixed
+                    except Exception:
+                        # On any error, fall back to original metrics list
+                        filtered_metrics = metrics
+
                 enriched = []
-                for m in metrics:
+                for m in filtered_metrics:
                     val = resolve_value(m)
                     if val is not None:
                         enriched.append((m, float(val)))
@@ -700,7 +720,7 @@ async def semantic_search_within_groups(
                                   reverse=reverse)[0][0]
                     matched_product = best.get('product_id') or matched_product
                     matched_company = best.get('company') or matched_company
-                    overall_score += 0.15
+                    overall_score += 0.15 * 0.4
 
         results.append({
             "company_name": company_name,
@@ -758,7 +778,8 @@ async def semantic_search_within_groups(
                 "semantic_similarity":
                 r['semantic_similarity'],
                 "overall_score":
-                r['overall_score'] + 0.05,  # slight preference to direct match
+                r['overall_score'] +
+                0.05 * 0.4,  # slight preference to direct match
                 "metadata":
                 r["metadata"],
             })
@@ -781,7 +802,7 @@ async def semantic_search_within_groups(
                     r['semantic_similarity'],
                     "overall_score":
                     r['overall_score'] -
-                    0.01,  # small demotion vs group winner
+                    0.01 * 0.4,  # small demotion vs group winner
                     "metadata":
                     r["metadata"],
                 })
