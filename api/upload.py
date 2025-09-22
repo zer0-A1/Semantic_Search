@@ -16,6 +16,7 @@ load_dotenv()
 
 router = APIRouter()
 
+
 def calculate_product_score(row: pd.Series, industry_category: str) -> float:
     """
     Calculate score for product data.
@@ -61,8 +62,6 @@ async def upload_file(file: UploadFile = File(...)):
     """
     Upload Excel or CSV file containing company or product data.
     Automatically updates VectorDB for product data.
-    
-    Company Data: File must contain a column named "公司名稱" (Company Name).
     Product Data: File must contain an industry category column (e.g., '產業別', 'industry_category').
     """
     file_id = str(uuid.uuid4())
@@ -98,6 +97,7 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500,
                             detail=f"Error processing file: {str(e)}")
+
 
 async def process_product_data(data: pd.DataFrame, file_id: str) -> int:
     """
@@ -156,6 +156,55 @@ async def process_product_data(data: pd.DataFrame, file_id: str) -> int:
             group_data.head(3).to_dict('records'),  # First 3 records as sample
             "last_updated": pd.Timestamp.now().isoformat()
         }
+
+        # Derive product identifiers and mapping to company names for better search resolution
+        try:
+            product_cols = [
+                col for col in group_data.columns if any(
+                    k in str(col) for k in
+                    ["問卷編號", "產品編號", "產品代號", "product_id", "product", "sku"])
+            ]
+            company_cols = [
+                col for col in group_data.columns
+                if any(k in str(col)
+                       for k in ["客戶名稱", "公司名稱", "company", "company_name"])
+            ]
+
+            product_col = product_cols[0] if product_cols else None
+            company_col = company_cols[0] if company_cols else None
+
+            product_ids: List[str] = []
+            product_to_company: Dict[str, str] = {}
+
+            if product_col:
+                for _, row in group_data.iterrows():
+                    pid_val = row.get(product_col)
+                    if pd.isna(pid_val):
+                        continue
+                    pid = str(pid_val).strip()
+                    if not pid:
+                        continue
+                    product_ids.append(pid)
+                    if company_col:
+                        cname_val = row.get(company_col)
+                        if not pd.isna(cname_val):
+                            product_to_company[pid] = str(cname_val).strip()
+
+            if product_ids:
+                # Keep unique order
+                seen = set()
+                unique_products = []
+                for p in product_ids:
+                    if p not in seen:
+                        unique_products.append(p)
+                        seen.add(p)
+
+                metadata["product_ids"] = unique_products
+                if product_to_company:
+                    metadata["product_to_company"] = product_to_company
+        except Exception:
+            # Non-fatal enrichment; ignore if any error occurs
+            pass
 
         # Update or create VectorDB entry
         await update_or_create_vector_entry(industry_category, embedding,
