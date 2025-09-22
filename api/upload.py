@@ -85,12 +85,14 @@ async def upload_file(file: UploadFile = File(...)):
         else:  # Excel files
             data = pd.read_excel(file_io)
 
-        products_processed = await process_product_data(data, file_id)
+        products_processed, filters_processed = await process_product_data(
+            data, file_id)
         return {
             "message":
             f"Successfully processed {products_processed} industry groups with embeddings",
             "file_id": file_id,
             "groups_processed": products_processed,
+            "filters": filters_processed,
             "data_type": "product"
         }
 
@@ -99,7 +101,8 @@ async def upload_file(file: UploadFile = File(...)):
                             detail=f"Error processing file: {str(e)}")
 
 
-async def process_product_data(data: pd.DataFrame, file_id: str) -> int:
+async def process_product_data(data: pd.DataFrame,
+                               file_id: str) -> tuple[int, List[str]]:
     """
     Process product data from DataFrame, classify by industry category (產業別), and create embeddings.
     Updates existing VectorDB entries or creates new ones as needed.
@@ -125,9 +128,15 @@ async def process_product_data(data: pd.DataFrame, file_id: str) -> int:
     # Group data by industry category
     industry_groups = data.groupby(industry_col)
     groups_processed = 0
+    filters_processed: List[str] = []
 
     # Process each group and update VectorDB
     for industry_category, group_data in industry_groups:
+        # Track filter value processed for response
+        try:
+            filters_processed.append(str(industry_category))
+        except Exception:
+            pass
         # Calculate scores and collect per-product metrics for each record in the group
         scores = []
 
@@ -329,7 +338,7 @@ async def process_product_data(data: pd.DataFrame, file_id: str) -> int:
                                             metadata)
         groups_processed += 1
 
-    return groups_processed
+    return groups_processed, filters_processed
 
 
 async def update_or_create_vector_entry(industry_category: str,

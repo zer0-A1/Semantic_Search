@@ -16,17 +16,128 @@ load_dotenv()
 
 router = APIRouter()
 
-# A basic English stopword set; extend with domain/Chinese stopwords as needed
+# A basic English + Chinese stopword set; extend with domain-specific items as needed
 BASIC_STOPWORDS = set([
-    'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'than', 'that', 'this',
-    'those', 'these', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'my',
-    'your', 'his', 'her', 'our', 'their', 'is', 'are', 'was', 'were', 'be',
-    'been', 'being', 'am', 'do', 'does', 'did', 'doing', 'to', 'for', 'of',
-    'on', 'in', 'with', 'at', 'by', 'from', 'as', 'about', 'into', 'over',
-    'after', 'can', 'could', 'should', 'would', 'will', 'shall', 'may',
-    'might', 'must', 'need', 'needs', 'needed', 'want', 'wants', 'wanted',
-    'looking', 'look', 'find', 'get', 'have', 'has', 'had', 'please', 'pls',
-    'high', 'quality'
+    # English
+    'the',
+    'a',
+    'an',
+    'and',
+    'or',
+    'but',
+    'if',
+    'then',
+    'than',
+    'that',
+    'this',
+    'those',
+    'these',
+    'i',
+    'you',
+    'he',
+    'she',
+    'it',
+    'we',
+    'they',
+    'me',
+    'my',
+    'your',
+    'his',
+    'her',
+    'our',
+    'their',
+    'is',
+    'are',
+    'was',
+    'were',
+    'be',
+    'been',
+    'being',
+    'am',
+    'do',
+    'does',
+    'did',
+    'doing',
+    'to',
+    'for',
+    'of',
+    'on',
+    'in',
+    'with',
+    'at',
+    'by',
+    'from',
+    'as',
+    'about',
+    'into',
+    'over',
+    'after',
+    'can',
+    'could',
+    'should',
+    'would',
+    'will',
+    'shall',
+    'may',
+    'might',
+    'must',
+    'need',
+    'needs',
+    'needed',
+    'want',
+    'wants',
+    'wanted',
+    'looking',
+    'look',
+    'find',
+    'get',
+    'have',
+    'has',
+    'had',
+    'please',
+    'pls',
+    'high',
+    'quality',
+    # Chinese (common function words)
+    '的',
+    '了',
+    '在',
+    '是',
+    '和',
+    '與',
+    '及',
+    '或',
+    '而',
+    '並',
+    '就',
+    '都',
+    '很',
+    '還',
+    '又',
+    '也',
+    '我',
+    '你',
+    '他',
+    '她',
+    '它',
+    '我們',
+    '你們',
+    '他們',
+    '這',
+    '那',
+    '這些',
+    '那些',
+    '哪',
+    '哪些',
+    '請',
+    '請問',
+    '幫我',
+    '找到',
+    '尋找',
+    '查找',
+    '需要',
+    '想要',
+    '關於'
 ])
 
 SIMPLE_SYNONYMS = {
@@ -41,6 +152,42 @@ SIMPLE_SYNONYMS = {
     "eight": "8",
     "nine": "9",
     "ten": "10",
+    "eleven": "11",
+    "twelve": "12",
+    "thirteen": "13",
+    "fourteen": "14",
+    "fifteen": "15",
+    "sixteen": "16",
+    "seventeen": "17",
+    "eighteen": "18",
+    "nineteen": "19",
+    "twenty": "20",
+    "thirty": "30",
+    "forty": "40",
+    "fifty": "50",
+    "sixty": "60",
+    "seventy": "70",
+    "eighty": "80",
+    "ninety": "90",
+    "hundred": "100",
+    "thousand": "1000",
+    # Chinese numerals (basic single-character forms)
+    "零": "0",
+    "一": "1",
+    "二": "2",
+    "兩": "2",
+    "三": "3",
+    "四": "4",
+    "五": "5",
+    "六": "6",
+    "七": "7",
+    "八": "8",
+    "九": "9",
+    "十": "10",
+    "百": "100",
+    "千": "1000",
+    "萬": "10000",
+    "万": "10000",
 }
 
 METRIC_SYNONYMS = {
@@ -52,6 +199,99 @@ METRIC_SYNONYMS = {
     "quality": "quality_score",
     "score": "quality_score",
 }
+
+# Mode synonyms for metric intent detection (EN + ZH)
+MODE_SYNONYMS = {
+    'max': [
+        'highest', 'maximum', 'max', 'maximize', 'top', 'best', 'largest',
+        'greatest', 'most', 'upper', 'peak', 'optimize', 'optimal', 'maximal',
+        '最高', '最大', '最多', '最佳', '最優', '最优', '最強', '最强'
+    ],
+    'min': [
+        'lowest', 'minimum', 'min', 'minimize', 'least', 'smallest', 'minimal',
+        'lower', 'worst', 'bottom', 'mininal', 'minumal', '最低', '最小', '最少',
+        '最差', '最弱'
+    ],
+}
+
+
+def _detect_metric_intent(query: str) -> Dict[str, Any] | None:
+    """Detect metric intent from query using broad EN/ZH synonyms and both word orders.
+
+    Supports patterns like:
+    - "highest quality", "maximum tensile strength"
+    - "quality highest", "品質 最高", "最高品質", "品質最高"
+    """
+    try:
+        # Prepare alternations
+        max_alt = "|".join(
+            sorted(set(MODE_SYNONYMS['max']), key=len, reverse=True))
+        min_alt = "|".join(
+            sorted(set(MODE_SYNONYMS['min']), key=len, reverse=True))
+
+        # Helper to normalize metric token
+        def norm_metric(metric_raw: str) -> tuple[str, str]:
+            mr = (metric_raw or '').strip()
+            token = mr.split()[0].lower() if mr else ''
+            token = METRIC_SYNONYMS.get(token, token)
+            return token, mr.lower()
+
+        # 1) Mode first (max)
+        m = re.search(
+            rf"(?:{max_alt})(?:的)?\s*([A-Za-z\u4e00-\u9fff_][A-Za-z0-9 \u4e00-\u9fff_\-]*)",
+            query, re.IGNORECASE)
+        if m:
+            metric_token, metric_raw = norm_metric(m.group(1))
+            if metric_token:
+                return {
+                    'mode': 'max',
+                    'metric': metric_token,
+                    'metric_raw': metric_raw
+                }
+
+        # 2) Mode first (min)
+        m = re.search(
+            rf"(?:{min_alt})(?:的)?\s*([A-Za-z\u4e00-\u9fff_][A-Za-z0-9 \u4e00-\u9fff_\-]*)",
+            query, re.IGNORECASE)
+        if m:
+            metric_token, metric_raw = norm_metric(m.group(1))
+            if metric_token:
+                return {
+                    'mode': 'min',
+                    'metric': metric_token,
+                    'metric_raw': metric_raw
+                }
+
+        # 3) Metric first (max at end)
+        m = re.search(
+            rf"([A-Za-z\u4e00-\u9fff_][A-Za-z0-9 \u4e00-\u9fff_\-]*)\s*(?:的)?\s*(?:{max_alt})",
+            query, re.IGNORECASE)
+        if m:
+            metric_token, metric_raw = norm_metric(m.group(1))
+            if metric_token:
+                return {
+                    'mode': 'max',
+                    'metric': metric_token,
+                    'metric_raw': metric_raw
+                }
+
+        # 4) Metric first (min at end)
+        m = re.search(
+            rf"([A-Za-z\u4e00-\u9fff_][A-Za-z0-9 \u4e00-\u9fff_\-]*)\s*(?:的)?\s*(?:{min_alt})",
+            query, re.IGNORECASE)
+        if m:
+            metric_token, metric_raw = norm_metric(m.group(1))
+            if metric_token:
+                return {
+                    'mode': 'min',
+                    'metric': metric_token,
+                    'metric_raw': metric_raw
+                }
+
+    except Exception:
+        pass
+
+    return None
 
 
 def preprocess_query_extract_keywords(query: str) -> Dict[str, Any]:
@@ -74,8 +314,8 @@ def preprocess_query_extract_keywords(query: str) -> Dict[str, Any]:
     except Exception:
         product_code = None
 
-    # Tokenize on non-alphanumeric boundaries; keep words >=2 chars
-    tokens = re.findall(r"[A-Za-z0-9]+", query.lower())
+    # Tokenize: capture ASCII words/numbers or contiguous CJK blocks
+    tokens = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]+", query.lower())
     filtered: List[str] = []
     for t in tokens:
         # synonym normalization (e.g., two -> 2)
@@ -84,7 +324,8 @@ def preprocess_query_extract_keywords(query: str) -> Dict[str, Any]:
             continue
         if t.isdigit() and len(t) < 2:
             continue
-        if len(t) < 2:
+        # For ASCII terms, skip too-short tokens; keep CJK tokens as-is
+        if re.match(r"^[A-Za-z0-9]+$", t) and len(t) < 2:
             continue
         filtered.append(t)
 
@@ -93,26 +334,8 @@ def preprocess_query_extract_keywords(query: str) -> Dict[str, Any]:
         filtered.append(product_code.lower())
 
     keywords_text = " ".join(filtered).strip() or query
-    # Basic metric intent detection (highest/lowest + metric)
-    metric_intent = None
-    try:
-        # e.g., "highest quantity", "lowest quality", "max tensile strength"
-        m = re.search(
-            r"\b(highest|max|lowest|min)\s+([A-Za-z\u4e00-\u9fff_][A-Za-z0-9 \u4e00-\u9fff_\-]*)\b",
-            query, re.IGNORECASE)
-        if m:
-            mode = m.group(1).lower()
-            metric_raw = m.group(2).strip().lower()
-            # choose first token as base; map synonyms
-            metric_token = metric_raw.split()[0]
-            metric_norm = METRIC_SYNONYMS.get(metric_token, metric_token)
-            metric_intent = {
-                'mode': 'max' if mode in ['highest', 'max'] else 'min',
-                'metric': metric_norm,
-                'metric_raw': metric_raw
-            }
-    except Exception:
-        metric_intent = None
+    # Enhanced metric intent detection with EN/ZH synonyms and flexible order
+    metric_intent = _detect_metric_intent(query)
 
     return {
         "keywords_text": keywords_text,
@@ -249,8 +472,9 @@ async def semantic_search(request: SearchRequest):
 
         # Save query and results to database
         query_id = None
+        result_ids: List[str] = []
         try:
-            query_id = await save_search_query_and_results(
+            query_id, result_ids = await save_search_query_and_results(
                 query_text=query,
                 filters=filters_str,
                 top_k=top_k,
@@ -266,6 +490,7 @@ async def semantic_search(request: SearchRequest):
             "query_id": query_id,
             "top_k": top_k,
             "returned": len(formatted_results),
+            "result_ids": result_ids,
             "results": formatted_results
         }
 
@@ -764,10 +989,13 @@ async def get_search_results(query_id: str):
                             detail=f"Failed to get search results: {str(e)}")
 
 
-async def save_search_query_and_results(query_text: str, filters: str,
-                                        top_k: int, results: list,
-                                        vector_ids: list) -> str:
-    """Save search query and its results to the database."""
+async def save_search_query_and_results(
+        query_text: str, filters: str, top_k: int, results: list,
+        vector_ids: list) -> tuple[str, list[str]]:
+    """Save search query and its results to the database.
+
+    Returns (query_id, result_ids) where result_ids align with the input results order.
+    """
 
     query_id = str(uuid.uuid4())
     created_at = datetime.now().isoformat()
@@ -783,10 +1011,12 @@ async def save_search_query_and_results(query_text: str, filters: str,
             session.add(search_query)
 
             # Save each result
+            created_result_ids: list[str] = []
             for rank, (result,
                        vector_id) in enumerate(zip(results, vector_ids), 1):
+                new_id = str(uuid.uuid4())
                 search_result = ORMSearchResult(
-                    id=str(uuid.uuid4()),
+                    id=new_id,
                     query_id=query_id,
                     company=result.company,
                     product=result.product,
@@ -797,9 +1027,10 @@ async def save_search_query_and_results(query_text: str, filters: str,
                     rank=rank,
                     vector_id=vector_id)
                 session.add(search_result)
+                created_result_ids.append(new_id)
 
             await session.commit()
-            return query_id
+            return query_id, created_result_ids
 
         except Exception as e:
             await session.rollback()

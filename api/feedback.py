@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from database.database import Feedback, get_session
+from database.database import SearchResult as ORMSearchResult
+from sqlalchemy import select
 from database.schemas import FeedbackRequest, FeedbackResponse
 import uuid
 from datetime import datetime
@@ -31,6 +33,21 @@ async def submit_feedback(feedback_request: FeedbackRequest):
 
         async for session in get_session():
             try:
+                # Verify result_id exists and matches query_id
+                stmt = select(ORMSearchResult).where(
+                    ORMSearchResult.id == feedback_request.result_id)
+                result = await session.execute(stmt)
+                db_result = result.scalar_one_or_none()
+
+                if not db_result:
+                    raise HTTPException(status_code=400,
+                                        detail="Invalid result_id: not found")
+
+                if db_result.query_id != feedback_request.query_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="result_id does not belong to query_id")
+
                 # Create feedback record
                 feedback = Feedback(id=feedback_id,
                                     query_id=feedback_request.query_id,
