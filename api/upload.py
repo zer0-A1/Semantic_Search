@@ -128,11 +128,123 @@ async def process_product_data(data: pd.DataFrame, file_id: str) -> int:
 
     # Process each group and update VectorDB
     for industry_category, group_data in industry_groups:
-        # Calculate scores for each record in the group
+        # Calculate scores and collect per-product metrics for each record in the group
         scores = []
+
+        # Try to locate common columns for products, company, quantity and tags once per group
+        product_cols_detect = [
+            col for col in group_data.columns
+            if any(k in str(col) for k in
+                   ["問卷編號", "產品編號", "產品代號", "product_id", "product", "sku"])
+        ]
+        company_cols_detect = [
+            col for col in group_data.columns
+            if any(k in str(col)
+                   for k in ["客戶名稱", "公司名稱", "company", "company_name"])
+        ]
+        quantity_cols_detect = [
+            col for col in group_data.columns
+            if any(k in str(col).lower() for k in ["數量", "quantity", "qty"])
+        ]
+        tags_cols_detect = [
+            col for col in group_data.columns
+            if any(k in str(col).lower() for k in ["tags", "tag", "標籤"])
+        ]
+
+        product_col_detect = product_cols_detect[
+            0] if product_cols_detect else None
+        company_col_detect = company_cols_detect[
+            0] if company_cols_detect else None
+        quantity_col_detect = quantity_cols_detect[
+            0] if quantity_cols_detect else None
+        tags_col_detect = tags_cols_detect[0] if tags_cols_detect else None
+
+        # Identify numeric columns (excluding obvious id/company columns)
+        id_like = {
+            c
+            for c in group_data.columns if any(
+                k in str(c).lower() for k in ["id", "編號", "代號", "問卷", "sku"])
+        }
+        company_like = {
+            c
+            for c in group_data.columns
+            if any(k in str(c).lower() for k in ["company", "公司", "客戶"])
+        }
+        ignore_cols = id_like.union(company_like)
+
+        numeric_fields = set()
+        for col in group_data.columns:
+            if col in ignore_cols:
+                continue
+            non_na = group_data[col].dropna().head(20)
+            if non_na.empty:
+                continue
+            parsable = 0
+            for v in non_na:
+                try:
+                    _ = float(v)
+                    parsable += 1
+                except Exception:
+                    pass
+            if parsable >= max(3, int(len(non_na) * 0.6)):
+                numeric_fields.add(str(col))
+
+        product_metrics = []
+
         for index, row in group_data.iterrows():
             score = calculate_product_score(row, industry_category)
             scores.append(score)
+
+            pid_val = row.get(
+                product_col_detect) if product_col_detect else None
+            pid = None if pd.isna(pid_val) else str(pid_val).strip()
+
+            cname_val = row.get(
+                company_col_detect) if company_col_detect else None
+            cname = None if pd.isna(cname_val) else str(cname_val).strip()
+
+            quantity_val = None
+            if quantity_col_detect:
+                qv = row.get(quantity_col_detect)
+                try:
+                    if not pd.isna(qv):
+                        quantity_val = float(qv)
+                except Exception:
+                    quantity_val = None
+
+            tags_val = None
+            if tags_col_detect:
+                tv = row.get(tags_col_detect)
+                if not pd.isna(tv):
+                    tags_val = [
+                        t.strip() for t in str(tv).replace('|', ',').split(',')
+                        if t.strip()
+                    ]
+
+            if pid:
+                # Include all fields for flexible metric queries
+                fields = {}
+                for col in group_data.columns:
+                    val = row.get(col)
+                    if pd.isna(val):
+                        continue
+                    key = str(col).strip()
+                    try:
+                        if key in numeric_fields:
+                            fields[key.lower()] = float(val)
+                        else:
+                            fields[key.lower()] = str(val).strip()
+                    except Exception:
+                        fields[key.lower()] = str(val)
+
+                product_metrics.append({
+                    "product_id": pid,
+                    "company": cname,
+                    "quantity": quantity_val,
+                    "quality_score": float(score),
+                    "tags": tags_val or [],
+                    "fields": fields
+                })
 
         # Calculate average score for the group
         average_score = np.mean(scores) if scores else 1.0
@@ -156,6 +268,12 @@ async def process_product_data(data: pd.DataFrame, file_id: str) -> int:
             group_data.head(3).to_dict('records'),  # First 3 records as sample
             "last_updated": pd.Timestamp.now().isoformat()
         }
+
+        # Attach per-product metrics if available
+        if product_metrics:
+            metadata["product_metrics"] = product_metrics
+            if numeric_fields:
+                metadata["numeric_fields"] = [nf for nf in numeric_fields]
 
         # Derive product identifiers and mapping to company names for better search resolution
         try:

@@ -1,7 +1,8 @@
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query
 from database.database import VectorDB, get_session, SearchQuery
-from database.schemas import SearchRequest, SearchResult
+from database.database import SearchResult as ORMSearchResult
+from database.schemas import SearchRequest, SearchResult as SearchResultSchema
 from sqlalchemy import select, or_
 from typing import List, Dict, Any
 import openai
@@ -28,6 +29,30 @@ BASIC_STOPWORDS = set([
     'high', 'quality'
 ])
 
+SIMPLE_SYNONYMS = {
+    "zero": "0",
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "ten": "10",
+}
+
+METRIC_SYNONYMS = {
+    "qty": "quantity",
+    "數量": "quantity",
+    "量": "quantity",
+    "品質": "quality_score",
+    "質量": "quality_score",
+    "quality": "quality_score",
+    "score": "quality_score",
+}
+
 
 def preprocess_query_extract_keywords(query: str) -> Dict[str, Any]:
     """Extract product codes and main keywords for embedding.
@@ -53,6 +78,8 @@ def preprocess_query_extract_keywords(query: str) -> Dict[str, Any]:
     tokens = re.findall(r"[A-Za-z0-9]+", query.lower())
     filtered: List[str] = []
     for t in tokens:
+        # synonym normalization (e.g., two -> 2)
+        t = SIMPLE_SYNONYMS.get(t, t)
         if t in BASIC_STOPWORDS:
             continue
         if t.isdigit() and len(t) < 2:
@@ -66,7 +93,32 @@ def preprocess_query_extract_keywords(query: str) -> Dict[str, Any]:
         filtered.append(product_code.lower())
 
     keywords_text = " ".join(filtered).strip() or query
-    return {"keywords_text": keywords_text, "product_code": product_code}
+    # Basic metric intent detection (highest/lowest + metric)
+    metric_intent = None
+    try:
+        # e.g., "highest quantity", "lowest quality", "max tensile strength"
+        m = re.search(
+            r"\b(highest|max|lowest|min)\s+([A-Za-z\u4e00-\u9fff_][A-Za-z0-9 \u4e00-\u9fff_\-]*)\b",
+            query, re.IGNORECASE)
+        if m:
+            mode = m.group(1).lower()
+            metric_raw = m.group(2).strip().lower()
+            # choose first token as base; map synonyms
+            metric_token = metric_raw.split()[0]
+            metric_norm = METRIC_SYNONYMS.get(metric_token, metric_token)
+            metric_intent = {
+                'mode': 'max' if mode in ['highest', 'max'] else 'min',
+                'metric': metric_norm,
+                'metric_raw': metric_raw
+            }
+    except Exception:
+        metric_intent = None
+
+    return {
+        "keywords_text": keywords_text,
+        "product_code": product_code,
+        "metric_intent": metric_intent
+    }
 
 
 def _normalize_product_code(code: str) -> str:
@@ -143,6 +195,7 @@ async def semantic_search(request: SearchRequest):
         qp = preprocess_query_extract_keywords(query)
         product_code = qp.get("product_code")
         query_for_embedding = qp.get("keywords_text") or query
+        metric_intent = qp.get("metric_intent")
 
         # Step 1: Filter VectorDB by filter values first
         filtered_groups = await filter_vectordb_by_filters(filters)
@@ -155,7 +208,8 @@ async def semantic_search(request: SearchRequest):
 
         # Step 3: Perform semantic search within filtered groups
         vector_results = await semantic_search_within_groups(
-            query, query_embedding, filtered_groups, top_k, product_code)
+            query, query_embedding, filtered_groups, top_k, product_code,
+            metric_intent)
 
         # Step 4: Convert to response format
         formatted_results = []
@@ -180,7 +234,7 @@ async def semantic_search(request: SearchRequest):
                 'product_name')
             preferred_company = result.get('matched_company') or company_name
 
-            formatted_result = SearchResult(
+            formatted_result = SearchResultSchema(
                 company=preferred_company,
                 product=preferred_product,
                 completeness_score=int(result['completeness_score'] * 100),
@@ -194,6 +248,7 @@ async def semantic_search(request: SearchRequest):
             vector_ids.append(result['metadata']['vector_id'])
 
         # Save query and results to database
+        query_id = None
         try:
             query_id = await save_search_query_and_results(
                 query_text=query,
@@ -206,8 +261,13 @@ async def semantic_search(request: SearchRequest):
             print(f"Failed to save search query: {e}")
             # Continue even if saving fails
 
-        # Return results in the specified format
-        return {"results": formatted_results}
+        # Return results and query_id (include requested top_k and actual count)
+        return {
+            "query_id": query_id,
+            "top_k": top_k,
+            "returned": len(formatted_results),
+            "results": formatted_results
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
@@ -282,7 +342,8 @@ async def semantic_search_within_groups(
         query_embedding: List[float],
         filtered_groups: List[VectorDB],
         top_k: int,
-        product_code: str = None) -> List[Dict[str, Any]]:
+        product_code: str = None,
+        metric_intent: Dict[str, Any] = None) -> List[Dict[str, Any]]:
     """
     Step 2: Perform semantic search within the filtered groups.
     Returns ranked results based on semantic similarity.
@@ -363,6 +424,59 @@ async def semantic_search_within_groups(
                 # Apply a boost to overall score to favor exact product matches
                 overall_score += 0.2
 
+        # If a metric intent is specified, pick best product in this group
+        if metric_intent:
+            metrics = metadata.get('product_metrics') or []
+            if metrics:
+                metric_key = metric_intent.get('metric')
+                metric_raw = metric_intent.get('metric_raw') or metric_key
+
+                # Build candidate keys: normalized token, raw phrase, and variants
+                candidates = []
+                if metric_key:
+                    candidates.append(metric_key)
+                if metric_raw:
+                    candidates.append(metric_raw)
+                    candidates.extend(metric_raw.replace('-', ' ').split())
+
+                def resolve_value(m: Dict[str, Any]) -> Any:
+                    # Direct top-level numeric
+                    for c in candidates:
+                        v = m.get(c)
+                        if isinstance(v, (int, float)):
+                            return v
+                    # Look into fields dict with case-insensitive and partial match
+                    fields = m.get('fields') or {}
+                    lowered = {str(k).lower(): v for k, v in fields.items()}
+                    for c in candidates:
+                        c_low = str(c).lower()
+                        # exact
+                        if c_low in lowered and isinstance(
+                                lowered[c_low], (int, float)):
+                            return lowered[c_low]
+                        # partial startswith
+                        for k, v in lowered.items():
+                            if isinstance(
+                                    v, (int, float)) and (k.startswith(c_low)
+                                                          or c_low in k):
+                                return v
+                    return None
+
+                enriched = []
+                for m in metrics:
+                    val = resolve_value(m)
+                    if val is not None:
+                        enriched.append((m, float(val)))
+
+                if enriched:
+                    reverse = metric_intent.get('mode') == 'max'
+                    best = sorted(enriched,
+                                  key=lambda t: t[1],
+                                  reverse=reverse)[0][0]
+                    matched_product = best.get('product_id') or matched_product
+                    matched_company = best.get('company') or matched_company
+                    overall_score += 0.15
+
         results.append({
             "company_name": company_name,
             "product_name": product_name,
@@ -388,6 +502,8 @@ async def semantic_search_within_groups(
                 metadata.get('data_sample', []),
                 "individual_scores":
                 metadata.get('individual_scores', []),
+                "product_metrics":
+                metadata.get('product_metrics', []),
                 "filter":
                 vector_entry.filter
             }
@@ -396,8 +512,72 @@ async def semantic_search_within_groups(
     # Sort by overall score (descending)
     results.sort(key=lambda x: x['overall_score'], reverse=True)
 
-    # Return only the top_k results
-    return results[:top_k]
+    # Expand to product-level items if we matched specific products or have metrics
+    expanded: List[Dict[str, Any]] = []
+    for r in results:
+        pm = r.get('metadata', {}).get('product_metrics') or []
+        if r.get('matched_product'):
+            # Only include the matched product from this group
+            matched_id = r['matched_product']
+            # Find company if possible
+            matched_company = r.get('matched_company') or r.get('company_name')
+            expanded.append({
+                "company_name":
+                matched_company or r.get('company_name'),
+                "product_name":
+                matched_id,
+                "document_status":
+                r['document_status'],
+                "completeness_score":
+                r['completeness_score'],
+                "semantic_similarity":
+                r['semantic_similarity'],
+                "overall_score":
+                r['overall_score'] + 0.05,  # slight preference to direct match
+                "metadata":
+                r["metadata"],
+            })
+        elif pm:
+            # Add top few products from this group by quality_score to diversify
+            top_products = sorted(pm,
+                                  key=lambda m: (m.get('quality_score') or 0),
+                                  reverse=True)[:3]
+            for m in top_products:
+                expanded.append({
+                    "company_name":
+                    m.get('company') or r.get('company_name'),
+                    "product_name":
+                    m.get('product_id') or r.get('product_name'),
+                    "document_status":
+                    r['document_status'],
+                    "completeness_score":
+                    r['completeness_score'],
+                    "semantic_similarity":
+                    r['semantic_similarity'],
+                    "overall_score":
+                    r['overall_score'] -
+                    0.01,  # small demotion vs group winner
+                    "metadata":
+                    r["metadata"],
+                })
+        else:
+            expanded.append(r)
+
+    # De-duplicate by (company_name, product_name)
+    seen_pairs = set()
+    deduped = []
+    for item in expanded:
+        pair = (item.get('company_name'), item.get('product_name'))
+        if pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        deduped.append(item)
+
+    # Sort again after expansion
+    deduped.sort(key=lambda x: x['overall_score'], reverse=True)
+
+    # Return only the top_k items
+    return deduped[:top_k]
 
 
 def calculate_cosine_similarity(embedding1: List[float],
@@ -540,7 +720,7 @@ async def get_search_results(query_id: str):
     """Get results for a specific search query."""
     try:
         async for session in get_session():
-            from database.database import SearchQuery, SearchResult
+            from database.database import SearchQuery, SearchResult as ORMSearchResult
 
             # Get the query
             query_stmt = select(SearchQuery).where(SearchQuery.id == query_id)
@@ -551,8 +731,9 @@ async def get_search_results(query_id: str):
                 raise HTTPException(status_code=404, detail="Query not found")
 
             # Get the results
-            results_stmt = select(SearchResult).where(
-                SearchResult.query_id == query_id).order_by(SearchResult.rank)
+            results_stmt = select(ORMSearchResult).where(
+                ORMSearchResult.query_id == query_id).order_by(
+                    ORMSearchResult.rank)
             results_result = await session.execute(results_stmt)
             results = results_result.scalars().all()
 
@@ -604,7 +785,7 @@ async def save_search_query_and_results(query_text: str, filters: str,
             # Save each result
             for rank, (result,
                        vector_id) in enumerate(zip(results, vector_ids), 1):
-                search_result = SearchResult(
+                search_result = ORMSearchResult(
                     id=str(uuid.uuid4()),
                     query_id=query_id,
                     company=result.company,

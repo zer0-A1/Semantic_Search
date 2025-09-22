@@ -118,7 +118,11 @@ python start.py
 - **Requirements**:
   - Must contain industry category column (e.g., '產業別', 'industry_category')
   - Data is grouped by industry and scored for quality
+  - Recommended product/code and company columns (any that match):
+    - Product: `問卷編號`, `產品編號`, `產品代號`, `product_id`, `product`, `sku`
+    - Company: `客戶名稱`, `公司名稱`, `company`, `company_name`
 - **Response**:
+
   ```json
   {
     "message": "Successfully processed X industry groups with embeddings",
@@ -127,6 +131,13 @@ python start.py
     "data_type": "product"
   }
   ```
+
+- **Metadata stored per industry group**:
+  - `product_ids`: list of detected product IDs
+  - `product_to_company`: mapping product_id → company
+  - `product_metrics`: array of per-product objects:
+    - `product_id`, `company`, `quantity`, `quality_score`, `tags`, `fields`
+  - `numeric_fields`: list of detected numeric column names
 
 #### VectorDB Management
 
@@ -175,22 +186,26 @@ python start.py
 #### Semantic Search
 
 - **POST** `/api/search`
-- **Description**: Perform AI-powered semantic search
+- **Description**: Perform AI-powered semantic search with keyword extraction, product-code matching, and metric-aware selection
 - **Request Body**:
   ```json
   {
-    "query_text": "尋找高品質的扣件供應商",
+    "query_text": "I need Q02 highest quantity product",
     "filters": "扣件", // or "industry:扣件,電子;country:TW"
     "top_k": 5
   }
   ```
 - **Response**:
+
   ```json
   {
+    "query_id": "uuid",
+    "top_k": 5,
+    "returned": 5,
     "results": [
       {
         "company": "ABC扣件公司",
-        "product": "Q2024001",
+        "product": "Q2024002",
         "completeness_score": 95,
         "semantic_score": 0.87,
         "doc_status": "有效",
@@ -199,6 +214,19 @@ python start.py
     ]
   }
   ```
+
+- **Query preprocessing features**:
+
+  - Keyword extraction with basic stopwords
+  - Product code detection with normalization (e.g., `Q02` ≈ `Q002`, hyphens ignored)
+  - Simple synonyms (e.g., `two` → `2`)
+  - Metric intent detection: “highest/lowest <metric>” maps to numeric fields (e.g., `quantity`, `quality_score`, or matching uploaded numeric columns via `fields`)
+
+- **Ranking behavior**:
+  - Score = 0.6 × completeness + 0.4 × semantic similarity
+  - Boost vectors that contain an exact product code match
+  - Honor metric intent by selecting the best product within top groups
+  - Expand group results into product-level items up to `top_k`
 
 #### Search History
 
