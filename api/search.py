@@ -194,23 +194,23 @@ METRIC_SYNONYMS = {
     "qty": "quantity",
     "數量": "quantity",
     "量": "quantity",
-    "品質": "quality_score",
-    "質量": "quality_score",
-    "quality": "quality_score",
-    "score": "quality_score",
+    "品質": "整體滿意度",
+    "質量": "整體滿意度",
+    "quality": "整體滿意度",
+    "score": "整體滿意度",
 }
 
 # Mode synonyms for metric intent detection (EN + ZH)
 MODE_SYNONYMS = {
     'max': [
         'highest', 'maximum', 'max', 'maximize', 'top', 'best', 'largest',
-        'greatest', 'most', 'upper', 'peak', 'optimize', 'optimal', 'maximal',
-        '最高', '最大', '最多', '最佳', '最優', '最优', '最強', '最强'
+        'high', 'greatest', 'most', 'upper', 'peak', 'optimize', 'optimal',
+        'maximal', '最高', '最大', '最多', '最佳', '最優', '最优', '最強', '最强', '高'
     ],
     'min': [
         'lowest', 'minimum', 'min', 'minimize', 'least', 'smallest', 'minimal',
-        'lower', 'worst', 'bottom', 'mininal', 'minumal', '最低', '最小', '最少',
-        '最差', '最弱'
+        'low', 'lower', 'worst', 'bottom', 'mininal', 'minumal', '最低', '最小',
+        '最少', '最差', '最弱', '低'
     ],
 }
 
@@ -721,7 +721,6 @@ async def semantic_search_within_groups(
                     matched_product = best.get('product_id') or matched_product
                     matched_company = best.get('company') or matched_company
                     overall_score += 0.15 * 0.4
-
         results.append({
             "company_name": company_name,
             "product_name": product_name,
