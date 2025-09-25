@@ -303,14 +303,17 @@ def preprocess_query_extract_keywords(query: str) -> Dict[str, Any]:
     if not query:
         return {"keywords_text": "", "product_code": None}
 
-    # Detect product code (normalize by removing '-')
+    # Detect product code (more flexible patterns)
     product_code = None
     try:
-        code_match = re.search(
-            r"\b([A-Za-z]?-?Q?\d{2,}|[A-Za-z]{2,}\-?\d{2,})\b", query,
-            re.IGNORECASE)
+        # Match patterns like: Q2, Q02, Q-2, Q-02, ABC2, ABC-2, etc.
+        code_match = re.search(r"\b([A-Za-z]+-?[0-9]+|[A-Za-z]?[0-9]+)\b",
+                               query, re.IGNORECASE)
         if code_match:
-            product_code = code_match.group(1).upper().replace('-', '')
+            raw_code = code_match.group(1).upper().replace('-', '')
+            # Only consider it a product code if it has both letters and numbers
+            if re.search(r'[A-Z]', raw_code) and re.search(r'[0-9]', raw_code):
+                product_code = raw_code
     except Exception:
         product_code = None
 
@@ -348,7 +351,7 @@ def _normalize_product_code(code: str) -> str:
     """Normalize product codes for comparison: uppercase, remove '-', drop leading zeros in numeric suffix.
 
     Examples:
-    - Q02 -> Q2; Q002 -> Q2; ABC-001 -> ABC1
+    - Q02 -> Q2; Q002 -> Q2; Q2 -> Q2; ABC-001 -> ABC1
     """
     if code is None:
         return ""
