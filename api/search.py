@@ -200,6 +200,30 @@ METRIC_SYNONYMS = {
     "score": "整體滿意度",
 }
 
+# Ordinal words to numbers (EN + basic ZH via regex handled separately)
+ORDINAL_WORDS = {
+    'first': 1,
+    '1st': 1,
+    'second': 2,
+    '2nd': 2,
+    'third': 3,
+    '3rd': 3,
+    'fourth': 4,
+    '4th': 4,
+    'fifth': 5,
+    '5th': 5,
+    'sixth': 6,
+    '6th': 6,
+    'seventh': 7,
+    '7th': 7,
+    'eighth': 8,
+    '8th': 8,
+    'ninth': 9,
+    '9th': 9,
+    'tenth': 10,
+    '10th': 10,
+}
+
 # Mode synonyms for metric intent detection (EN + ZH)
 MODE_SYNONYMS = {
     'max': [
@@ -243,10 +267,25 @@ def _detect_metric_intent(query: str) -> Dict[str, Any] | None:
         if m:
             metric_token, metric_raw = norm_metric(m.group(1))
             if metric_token:
+                rank = 1
+                # detect ordinals around the phrase
+                ql = query.lower()
+                for ow, rv in ORDINAL_WORDS.items():
+                    if ow in ql:
+                        rank = rv
+                        break
+                # Chinese: 第N (e.g., 第2, 第二)
+                m_ord = re.search(r"第\s*(\d+)", query)
+                if m_ord:
+                    try:
+                        rank = int(m_ord.group(1))
+                    except Exception:
+                        pass
                 return {
                     'mode': 'max',
                     'metric': metric_token,
-                    'metric_raw': metric_raw
+                    'metric_raw': metric_raw,
+                    'rank': rank
                 }
 
         # 2) Mode first (min)
@@ -256,10 +295,23 @@ def _detect_metric_intent(query: str) -> Dict[str, Any] | None:
         if m:
             metric_token, metric_raw = norm_metric(m.group(1))
             if metric_token:
+                rank = 1
+                ql = query.lower()
+                for ow, rv in ORDINAL_WORDS.items():
+                    if ow in ql:
+                        rank = rv
+                        break
+                m_ord = re.search(r"第\s*(\d+)", query)
+                if m_ord:
+                    try:
+                        rank = int(m_ord.group(1))
+                    except Exception:
+                        pass
                 return {
                     'mode': 'min',
                     'metric': metric_token,
-                    'metric_raw': metric_raw
+                    'metric_raw': metric_raw,
+                    'rank': rank
                 }
 
         # 3) Metric first (max at end)
@@ -269,10 +321,23 @@ def _detect_metric_intent(query: str) -> Dict[str, Any] | None:
         if m:
             metric_token, metric_raw = norm_metric(m.group(1))
             if metric_token:
+                rank = 1
+                ql = query.lower()
+                for ow, rv in ORDINAL_WORDS.items():
+                    if ow in ql:
+                        rank = rv
+                        break
+                m_ord = re.search(r"第\s*(\d+)", query)
+                if m_ord:
+                    try:
+                        rank = int(m_ord.group(1))
+                    except Exception:
+                        pass
                 return {
                     'mode': 'max',
                     'metric': metric_token,
-                    'metric_raw': metric_raw
+                    'metric_raw': metric_raw,
+                    'rank': rank
                 }
 
         # 4) Metric first (min at end)
@@ -282,10 +347,23 @@ def _detect_metric_intent(query: str) -> Dict[str, Any] | None:
         if m:
             metric_token, metric_raw = norm_metric(m.group(1))
             if metric_token:
+                rank = 1
+                ql = query.lower()
+                for ow, rv in ORDINAL_WORDS.items():
+                    if ow in ql:
+                        rank = rv
+                        break
+                m_ord = re.search(r"第\s*(\d+)", query)
+                if m_ord:
+                    try:
+                        rank = int(m_ord.group(1))
+                    except Exception:
+                        pass
                 return {
                     'mode': 'min',
                     'metric': metric_token,
-                    'metric_raw': metric_raw
+                    'metric_raw': metric_raw,
+                    'rank': rank
                 }
 
     except Exception:
@@ -422,6 +500,19 @@ async def semantic_search(request: SearchRequest):
         product_code = qp.get("product_code")
         query_for_embedding = qp.get("keywords_text") or query
         metric_intent = qp.get("metric_intent")
+        # Company list intent: list all companies in current filter context
+        company_list_intent = False
+        try:
+            if re.search(
+                    r"\b(list|show)\b.*\b(companies|company|suppliers?)\b",
+                    query, re.IGNORECASE):
+                company_list_intent = True
+            if re.search(r"(列出|清單|所有).*(公司|廠商)", query):
+                company_list_intent = True
+            if re.fullmatch(r"\s*(list\s*all)\s*", query, re.IGNORECASE):
+                company_list_intent = True
+        except Exception:
+            company_list_intent = False
 
         # Step 1: Filter VectorDB by filter values first
         filtered_groups = await filter_vectordb_by_filters(filters)
@@ -429,15 +520,49 @@ async def semantic_search(request: SearchRequest):
         if not filtered_groups:
             return {"results": []}
 
-        # Step 2: Generate embedding using preprocessed keywords
+        # Step 2: If listing companies, aggregate without embedding
+        if company_list_intent:
+            # Aggregate across filtered groups
+            seen: Dict[str, str] = {}
+
+            def add_company(name: str):
+                if not name:
+                    return
+                norm = str(name).strip()
+                if not norm or norm.lower() == 'unknown company':
+                    return
+                norm = re.sub(r"\s+", " ", norm)
+                key = norm.lower()
+                if key not in seen:
+                    seen[key] = norm  # preserve first-seen casing
+
+            for vector_entry in filtered_groups:
+                md = vector_entry.metadata_json or {}
+                # product_metrics preferred
+                for m in (md.get('product_metrics') or []):
+                    add_company(m.get('company'))
+                # data_sample fallback
+                for rec in (md.get('data_sample') or []):
+                    add_company(
+                        rec.get('客戶名稱') or rec.get('公司名稱')
+                        or rec.get('company_name') or rec.get('company'))
+                # direct metadata fallback
+                add_company(
+                    md.get('客戶名稱') or md.get('公司名稱') or md.get('company_name')
+                    or md.get('company'))
+
+            companies = sorted(seen.values(), key=lambda s: s.lower())
+            return {"companies": companies}
+
+        # Step 3: Generate embedding using preprocessed keywords
         query_embedding = await generate_embedding(query_for_embedding)
 
-        # Step 3: Perform semantic search within filtered groups
+        # Step 4: Perform semantic search within filtered groups
         vector_results = await semantic_search_within_groups(
             query, query_embedding, filtered_groups, top_k, product_code,
             metric_intent)
 
-        # Step 4: Convert to response format
+        # Step 5: Convert to response format
         formatted_results = []
         vector_ids = []
 
@@ -718,11 +843,18 @@ async def semantic_search_within_groups(
 
                 if enriched:
                     reverse = metric_intent.get('mode') == 'max'
-                    best = sorted(enriched,
-                                  key=lambda t: t[1],
-                                  reverse=reverse)[0][0]
-                    matched_product = best.get('product_id') or matched_product
-                    matched_company = best.get('company') or matched_company
+                    rank = max(1, int(metric_intent.get('rank') or 1))
+                    sorted_list = sorted(enriched,
+                                         key=lambda t: t[1],
+                                         reverse=reverse)
+                    if rank <= len(sorted_list):
+                        chosen = sorted_list[rank - 1][0]
+                    else:
+                        chosen = sorted_list[-1][0]
+                    matched_product = chosen.get(
+                        'product_id') or matched_product
+                    matched_company = chosen.get('company') or matched_company
+                    # slight boost when honoring metric intent rank
                     overall_score += 0.15 * 0.4
         results.append({
             "company_name": company_name,
