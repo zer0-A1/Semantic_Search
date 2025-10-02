@@ -1,14 +1,11 @@
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional, List, Union
-
+from typing import Optional
 
 #Search
 class SearchRequest(BaseModel):
-    # Required primary inputs
     query_text: str
-    industry: Optional[Union[str, List[str]]] = None
-    country: Optional[Union[str, List[str]]] = None
+    filters: str
     top_k: int = 5
 
 
@@ -26,6 +23,8 @@ class SearchResult(BaseModel):
     # numeric_gap: NumericGap
     doc_status: str
     total_score: int
+
+
 
 
 #Feedback
