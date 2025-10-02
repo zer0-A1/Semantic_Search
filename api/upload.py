@@ -9,15 +9,82 @@ import io
 import openai
 import os
 from dotenv import load_dotenv
-from datetime import date
+from datetime import date, datetime
 import numpy as np
+import math
 
 load_dotenv()
 
 router = APIRouter()
 
 
-def calculate_product_score(row: pd.Series, industry_category: str) -> float:
+def convert_to_date_style(date_str):
+    # If already a date/datetime, normalize to date
+    try:
+        if isinstance(date_str, datetime):
+            return date_str.date()
+        if isinstance(date_str, date):
+            return date_str
+    except Exception:
+        pass
+
+    # Handle None, empty, or invalid values
+    if pd.isna(date_str) or str(date_str).strip() == '' or str(
+            date_str).lower() in ['nan', 'none', 'null']:
+        raise ValueError(f"Invalid date value: {date_str}")
+
+    # Handle Excel serial dates (numeric values)
+    try:
+        if isinstance(date_str, (int, float)) and not pd.isna(date_str):
+            # Excel serial date: days since 1900-01-01 (with leap year bug)
+            # Excel incorrectly treats 1900 as a leap year
+            excel_epoch = datetime(1899, 12, 30)  # Excel's epoch
+            if 1 <= date_str <= 2958465:  # Reasonable date range
+                result_date = excel_epoch + pd.Timedelta(days=date_str)
+                if result_date.year > 1900:  # Valid date after 1900
+                    return result_date.date()
+    except Exception:
+        pass
+
+    # Try pandas to_datetime with different dayfirst settings
+    try:
+        # First try with dayfirst=False (US format: MM/DD/YYYY)
+        ts = pd.to_datetime(str(date_str), errors='coerce', dayfirst=False)
+        if pd.notna(ts) and ts.year > 1900:  # Valid date after 1900
+            return ts.date()
+    except Exception:
+        pass
+
+    try:
+        # Then try with dayfirst=True (EU format: DD/MM/YYYY)
+        ts = pd.to_datetime(str(date_str), errors='coerce', dayfirst=True)
+        if pd.notna(ts) and ts.year > 1900:  # Valid date after 1900
+            return ts.date()
+    except Exception:
+        pass
+
+    # Try explicit formats as fallback
+    formats = [
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+        "%m/%d/%Y",  # US format
+        "%d/%m/%Y",  # EU format
+        "%d-%m-%Y",
+        "%m-%d-%Y",
+    ]
+
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(str(date_str), fmt)
+            if dt.year > 1900:  # Valid date after 1900
+                return dt.date()
+        except Exception:
+            continue
+
+    raise ValueError(f"Invalid date format: {date_str}")
+
+
+def calculate_product_score(row: pd.Series) -> float:
     """
     Calculate score for product data.
     Start with 1.0, minus 0.05 for each empty column.
@@ -35,26 +102,160 @@ def calculate_product_score(row: pd.Series, industry_category: str) -> float:
 
     # Check date validation
     today = date.today()
-
     # Check expire date
     if 'expire_date' in row.index and not pd.isna(row['expire_date']):
         try:
-            expire_date = pd.to_datetime(row['expire_date']).date()
+            expire_date = convert_to_date_style(row['expire_date'])
+            print(f"Debug - Expire date: {expire_date}, Today: {today}")
             if expire_date < today:
                 score -= date_penalty
-        except:
-            pass  # If date parsing fails, skip penalty
+                print(f"Debug - Expire date penalty applied: {score}")
+        except Exception as e:
+            print(
+                f"Debug - Expire date parsing failed: {row['expire_date']}, Error: {e}"
+            )
+            # If date parsing fails, skip penalty
 
     # Check issue date
     if 'issue_date' in row.index and not pd.isna(row['issue_date']):
         try:
-            issue_date = pd.to_datetime(row['issue_date']).date()
+            issue_date = convert_to_date_style(row['issue_date'])
+            print(f"Debug - Issue date: {issue_date}, Today: {today}")
             if issue_date > today:
                 score -= date_penalty
-        except:
-            pass  # If date parsing fails, skip penalty
-
+                print(f"Debug - Issue date penalty applied: {score}")
+        except Exception as e:
+            print(
+                f"Debug - Issue date parsing failed: {row['issue_date']}, Error: {e}"
+            )
+            # If date parsing fails, skip penalty
+    print(f"Debug - Score: {score}")
     return max(0.0, score)  # Ensure score doesn't go below 0
+
+
+def _extract_country_from_row(row: pd.Series) -> str | None:
+    """
+    Heuristically extract a country string from common columns like country/address.
+    Returns a raw country string if found; otherwise None.
+    """
+    candidate_cols = []
+    for col in row.index:
+        col_l = str(col).lower()
+        if any(k in col_l for k in [
+                "country", "國家", "國別", "國籍", "地址", "address", "addr", "所在地",
+                "公司地址", "營業地址"
+        ]):
+            candidate_cols.append(col)
+    for col in candidate_cols:
+        try:
+            val = row.get(col)
+            if pd.isna(val):
+                continue
+            s = str(val).strip()
+            if s:
+                return s
+        except Exception:
+            continue
+    return None
+
+
+def _convert_excel_date_to_string(date_value):
+    """
+    Convert Excel serial date or other date formats to YYYY-MM-DD string.
+    Returns the original value if conversion fails.
+    """
+    try:
+        # If already a date/datetime, format to string
+        if isinstance(date_value, datetime):
+            return date_value.strftime('%Y-%m-%d')
+        if isinstance(date_value, date):
+            return date_value.strftime('%Y-%m-%d')
+
+        # Handle Excel serial dates (numeric values)
+        if isinstance(date_value, (int, float)) and not pd.isna(date_value):
+            # Excel serial date: days since 1900-01-01 (with leap year bug)
+            excel_epoch = datetime(1899, 12, 30)  # Excel's epoch
+            if 1 <= date_value <= 2958465:  # Reasonable date range
+                result_date = excel_epoch + pd.Timedelta(days=date_value)
+                if result_date.year > 1900:  # Valid date after 1900
+                    return result_date.strftime('%Y-%m-%d')
+
+        # Try pandas to_datetime for string dates
+        ts = pd.to_datetime(str(date_value), errors='coerce')
+        if pd.notna(ts) and ts.year > 1900:
+            return ts.strftime('%Y-%m-%d')
+
+    except Exception:
+        pass
+
+    # Return original value if conversion fails
+    return date_value
+
+
+def _sanitize_data_sample_for_json(data_sample):
+    """
+    Convert Excel serial dates in data_sample to readable string format.
+    """
+    if not data_sample:
+        return data_sample
+
+    sanitized = []
+    for record in data_sample:
+        sanitized_record = {}
+        for key, value in record.items():
+            # Check if this looks like a date column
+            if any(date_key in str(key).lower()
+                   for date_key in ['date', '日期', 'expire', 'issue']):
+                sanitized_record[key] = _convert_excel_date_to_string(value)
+            else:
+                sanitized_record[key] = value
+        sanitized.append(sanitized_record)
+
+    return sanitized
+
+
+def _sanitize_json(value):
+    """
+    Recursively sanitize Python objects to be JSON-safe for Postgres JSON:
+    - Replace NaN/Inf/-Inf with None
+    - Convert pandas/NumPy scalar types to native Python types
+    - Convert non-serializable values to strings as a last resort
+    """
+
+    if value is None:
+        return None
+    # Basic numeric types
+    if isinstance(value, (int, )):
+        return int(value)
+    if isinstance(value, float):
+        return None if not math.isfinite(value) else float(value)
+    # NumPy scalar types
+    if isinstance(value, (np.integer, )):
+        return int(value)
+    if isinstance(value, (np.floating, )):
+        f = float(value)
+        return None if not math.isfinite(f) else f
+    # Strings
+    if isinstance(value, str):
+        return value
+    # Dict
+    if isinstance(value, dict):
+        return {str(k): _sanitize_json(v) for k, v in value.items()}
+    # List/Tuple/Set
+    if isinstance(value, (list, tuple, set)):
+        return [_sanitize_json(v) for v in list(value)]
+    # Pandas Timestamp/NaT and others -> string or None
+    try:
+        # Handle pandas.NaT and np.nan
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    # Fallback to string
+    try:
+        return str(value)
+    except Exception:
+        return None
 
 
 @router.post("/upload")
@@ -137,7 +338,34 @@ async def process_product_data(data: pd.DataFrame,
             filters_processed.append(str(industry_category))
         except Exception:
             pass
-        # Calculate scores and collect per-product metrics for each record in the group
+        # Precompute per-row normalized country for subgrouping
+        def _normalize_country(v: str | None) -> str | None:
+            if v is None:
+                return None
+            try:
+                s = str(v)
+            except Exception:
+                return None
+            s = s.replace('\n', ' ').strip()
+            s = ' '.join(s.split())
+            return s if s else None
+
+        # Convert all date columns in the group data to readable format
+        def convert_dataframe_dates(df):
+            """Convert all date columns in DataFrame to readable string format."""
+            df_copy = df.copy()
+            for col in df_copy.columns:
+                # Check if this looks like a date column
+                if any(date_key in str(col).lower()
+                       for date_key in ['date', '日期', 'expire', 'issue']):
+                    df_copy[col] = df_copy[col].apply(
+                        _convert_excel_date_to_string)
+            return df_copy
+
+        # Apply date conversion to the entire group data
+        group_data = convert_dataframe_dates(group_data)
+
+        # Calculate scores and collect per-product metrics for each record in the group (full group first)
         scores = []
 
         # Try to locate common columns for products, company, quantity and tags once per group
@@ -155,10 +383,6 @@ async def process_product_data(data: pd.DataFrame,
             col for col in group_data.columns
             if any(k in str(col).lower() for k in ["數量", "quantity", "qty"])
         ]
-        tags_cols_detect = [
-            col for col in group_data.columns
-            if any(k in str(col).lower() for k in ["tags", "tag", "標籤"])
-        ]
 
         product_col_detect = product_cols_detect[
             0] if product_cols_detect else None
@@ -166,7 +390,6 @@ async def process_product_data(data: pd.DataFrame,
             0] if company_cols_detect else None
         quantity_col_detect = quantity_cols_detect[
             0] if quantity_cols_detect else None
-        tags_col_detect = tags_cols_detect[0] if tags_cols_detect else None
 
         # Identify numeric columns (excluding obvious id/company columns)
         id_like = {
@@ -199,9 +422,11 @@ async def process_product_data(data: pd.DataFrame,
                 numeric_fields.add(str(col))
 
         product_metrics = []
+        countries_in_group = set()
+        row_countries: Dict[int, str | None] = {}
 
         for index, row in group_data.iterrows():
-            score = calculate_product_score(row, industry_category)
+            score = calculate_product_score(row)
             scores.append(score)
 
             pid_val = row.get(
@@ -221,14 +446,17 @@ async def process_product_data(data: pd.DataFrame,
                 except Exception:
                     quantity_val = None
 
-            tags_val = None
-            if tags_col_detect:
-                tv = row.get(tags_col_detect)
-                if not pd.isna(tv):
-                    tags_val = [
-                        t.strip() for t in str(tv).replace('|', ',').split(',')
-                        if t.strip()
-                    ]
+            # Extract country from row
+            country_val = _extract_country_from_row(row)
+            if country_val:
+                try:
+                    cn = _normalize_country(country_val)
+                    countries_in_group.add(cn)
+                    row_countries[index] = cn
+                except Exception:
+                    row_countries[index] = None
+            else:
+                row_countries[index] = None
 
             if pid:
                 # Include all fields for flexible metric queries
@@ -245,98 +473,180 @@ async def process_product_data(data: pd.DataFrame,
                             fields[key.lower()] = str(val).strip()
                     except Exception:
                         fields[key.lower()] = str(val)
+                # Derive quality score fallback if no tags provided
+                quality_score_value = float(score)
+                if fields:
+                    # Try to compute average of delivery rate and return rate (percentages)
+                    def _parse_rate(v):
+                        try:
+                            f = float(v)
+                            # Heuristic: >1 means percentage 0-100
+                            return f / 100.0 if f > 1.0 else f
+                        except Exception:
+                            return None
+
+                    # Common field name variants
+                    delivery_keys = [
+                        "delivery_rate", "delivery rate", "準時交貨率", "交貨率",
+                        "on_time_delivery_rate", "otd", "delivery%"
+                    ]
+                    return_keys = [
+                        "return_rate", "return rate", "退貨率", "退貨%", "rma_rate"
+                    ]
+                    d_vals = []
+                    r_vals = []
+                    lowered = {str(k).lower(): v for k, v in fields.items()}
+                    for k in list(lowered.keys()):
+                        if any(
+                                k.startswith(dk) or dk in k
+                                for dk in delivery_keys):
+                            parsed = _parse_rate(lowered[k])
+                            if parsed is not None:
+                                d_vals.append(parsed)
+                        if any(
+                                k.startswith(rk) or rk in k
+                                for rk in return_keys):
+                            parsed = _parse_rate(lowered[k])
+                            if parsed is not None:
+                                r_vals.append(parsed)
+                    d = d_vals[0] if d_vals else None
+                    r = r_vals[0] if r_vals else None
+                    if d is not None and r is not None:
+                        try:
+                            quality_score_value = float(
+                                max(0.0, min(1.0, (d + r) / 2.0)))
+                        except Exception:
+                            pass
+                    elif d is not None:
+                        quality_score_value = float(max(0.0, min(1.0, d)))
+                    elif r is not None:
+                        quality_score_value = float(max(0.0, min(1.0, r)))
 
                 product_metrics.append({
-                    "product_id": pid,
-                    "company": cname,
-                    "quantity": quantity_val,
-                    "quality_score": float(score),
-                    "tags": tags_val or [],
-                    "fields": fields
+                    "product_id":
+                    pid,
+                    "company":
+                    cname,
+                    "quantity":
+                    quantity_val,
+                    "quality_score":
+                    float(quality_score_value),
+                    "score":
+                    float(score),
+                    "country":
+                    country_val,
+                    "fields":
+                    fields
                 })
 
-        # Calculate average score for the group
-        average_score = np.mean(scores) if scores else 1.0
+        # If countries present, create subgroup entries per country; otherwise one entry
+        subgroup_keys = sorted({c for c in countries_in_group if c}) or [None]
 
-        # Create text content for embedding (include average score)
-        text_content = create_product_text_content(industry_category,
-                                                   group_data, average_score)
+        for cn in subgroup_keys:
+            if cn is None:
+                mask = [row_countries.get(i) is None for i in group_data.index]
+            else:
+                mask = [row_countries.get(i) == cn for i in group_data.index]
+            # Build subgroup DataFrame
+            try:
+                mask_series = pd.Series(mask, index=group_data.index)
+                subgroup = group_data[mask_series]
+            except Exception:
+                subgroup = group_data
 
-        # Generate embedding
-        embedding = await generate_embedding(text_content)
+            # Apply date conversion to subgroup as well
+            subgroup = convert_dataframe_dates(subgroup)
 
-        # Create metadata
-        metadata = {
-            "industry_category": str(industry_category),
-            "file_id": file_id,
-            "record_count": len(group_data),
-            "average_score": float(average_score),
-            "individual_scores": [float(s) for s in scores],
-            "columns": list(group_data.columns),
-            "data_sample":
-            group_data.head(3).to_dict('records'),  # First 3 records as sample
-            "last_updated": pd.Timestamp.now().isoformat()
-        }
+            # Recompute scores for subgroup
+            scores_sub = []
+            for _, r in subgroup.iterrows():
+                scores_sub.append(calculate_product_score(r))
+            average_score = np.mean(scores_sub) if scores_sub else 1.0
 
-        # Attach per-product metrics if available
-        if product_metrics:
-            metadata["product_metrics"] = product_metrics
-            if numeric_fields:
-                metadata["numeric_fields"] = [nf for nf in numeric_fields]
+            # Create text content for embedding (include average score)
+            text_content = create_product_text_content(industry_category,
+                                                       subgroup, average_score)
+            embedding = await generate_embedding(text_content)
 
-        # Derive product identifiers and mapping to company names for better search resolution
-        try:
-            product_cols = [
-                col for col in group_data.columns if any(
-                    k in str(col) for k in
-                    ["問卷編號", "產品編號", "產品代號", "product_id", "product", "sku"])
-            ]
-            company_cols = [
-                col for col in group_data.columns
-                if any(k in str(col)
-                       for k in ["客戶名稱", "公司名稱", "company", "company_name"])
-            ]
+            # Subset product_metrics to this country
+            if cn is None:
+                pm_sub = [m for m in product_metrics if not m.get('country')]
+            else:
+                pm_sub = [
+                    m for m in product_metrics
+                    if m.get('country') and str(m.get('country')).strip() == cn
+                ]
 
-            product_col = product_cols[0] if product_cols else None
-            company_col = company_cols[0] if company_cols else None
+            # Create metadata for subgroup
+            # Dates are already converted, so we can use to_dict directly
+            metadata = {
+                "industry_category": str(industry_category),
+                "group_country": cn,
+                "file_id": file_id,
+                "record_count": int(len(subgroup)),
+                "average_score": float(average_score),
+                "individual_scores": [float(s) for s in scores_sub],
+                "columns": list(subgroup.columns),
+                "data_sample": subgroup.head(3).to_dict('records'),
+                "last_updated": pd.Timestamp.now().isoformat(),
+                "countries": [cn] if cn else []
+            }
 
-            product_ids: List[str] = []
-            product_to_company: Dict[str, str] = {}
+            if pm_sub:
+                metadata["product_metrics"] = pm_sub
+                if numeric_fields:
+                    metadata["numeric_fields"] = [nf for nf in numeric_fields]
 
-            if product_col:
-                for _, row in group_data.iterrows():
-                    pid_val = row.get(product_col)
-                    if pd.isna(pid_val):
-                        continue
-                    pid = str(pid_val).strip()
-                    if not pid:
-                        continue
-                    product_ids.append(pid)
-                    if company_col:
-                        cname_val = row.get(company_col)
-                        if not pd.isna(cname_val):
-                            product_to_company[pid] = str(cname_val).strip()
+            # Derive product ids mapping within subgroup
+            try:
+                product_cols = [
+                    col for col in subgroup.columns
+                    if any(k in str(col) for k in [
+                        "問卷編號", "產品編號", "產品代號", "product_id", "product", "sku"
+                    ])
+                ]
+                company_cols = [
+                    col for col in subgroup.columns if any(
+                        k in str(col)
+                        for k in ["客戶名稱", "公司名稱", "company", "company_name"])
+                ]
+                product_col = product_cols[0] if product_cols else None
+                company_col = company_cols[0] if company_cols else None
+                product_ids: List[str] = []
+                product_to_company: Dict[str, str] = {}
+                if product_col:
+                    for _, row in subgroup.iterrows():
+                        pid_val = row.get(product_col)
+                        if pd.isna(pid_val):
+                            continue
+                        pid = str(pid_val).strip()
+                        if not pid:
+                            continue
+                        product_ids.append(pid)
+                        if company_col:
+                            cname_val = row.get(company_col)
+                            if not pd.isna(cname_val):
+                                product_to_company[pid] = str(
+                                    cname_val).strip()
+                if product_ids:
+                    seen = set()
+                    unique_products = []
+                    for p in product_ids:
+                        if p not in seen:
+                            unique_products.append(p)
+                            seen.add(p)
+                    metadata["product_ids"] = unique_products
+                    if product_to_company:
+                        metadata["product_to_company"] = product_to_company
+            except Exception:
+                pass
 
-            if product_ids:
-                # Keep unique order
-                seen = set()
-                unique_products = []
-                for p in product_ids:
-                    if p not in seen:
-                        unique_products.append(p)
-                        seen.add(p)
-
-                metadata["product_ids"] = unique_products
-                if product_to_company:
-                    metadata["product_to_company"] = product_to_company
-        except Exception:
-            # Non-fatal enrichment; ignore if any error occurs
-            pass
-
-        # Update or create VectorDB entry
-        await update_or_create_vector_entry(industry_category, embedding,
-                                            metadata)
-        groups_processed += 1
+            # Build filter label including country for better discoverability
+            entry_filter = f"{industry_category}|{cn}" if cn else str(
+                industry_category)
+            await update_or_create_vector_entry(entry_filter, embedding,
+                                                metadata)
+            groups_processed += 1
 
     return groups_processed, filters_processed
 
@@ -355,10 +665,13 @@ async def update_or_create_vector_entry(industry_category: str,
             result = await session.execute(stmt)
             existing_entry = result.scalar_one_or_none()
 
+            # sanitize metadata before persistence
+            safe_metadata = _sanitize_json(metadata)
+
             if existing_entry:
                 # Update existing entry
                 existing_entry.embedding = embedding
-                existing_entry.metadata_json = metadata
+                existing_entry.metadata_json = safe_metadata
                 print(
                     f"Updated VectorDB entry for industry: {industry_category}"
                 )
@@ -367,7 +680,7 @@ async def update_or_create_vector_entry(industry_category: str,
                 vector_entry = VectorDB(id=str(uuid.uuid4()),
                                         filter=industry_category,
                                         embedding=embedding,
-                                        metadata_json=metadata)
+                                        metadata_json=safe_metadata)
                 session.add(vector_entry)
                 print(
                     f"Created new VectorDB entry for industry: {industry_category}"
@@ -462,7 +775,7 @@ async def refresh_vectordb():
                     # Update entry
                     entry.embedding = new_embedding
                     metadata['last_refreshed'] = pd.Timestamp.now().isoformat()
-                    entry.metadata_json = metadata
+                    entry.metadata_json = _sanitize_json(metadata)
 
                     updated_count += 1
 
