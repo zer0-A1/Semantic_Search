@@ -203,6 +203,17 @@ METRIC_SYNONYMS = {
 
 # Ordinal words to numbers (EN + basic ZH via regex handled separately)
 ORDINAL_WORDS = {
+    'fs': 1,
+    '1fs': 1,
+    '2fs': 2,
+    '3fs': 3,
+    '4fs': 4,
+    '5fs': 5,
+    '6fs': 6,
+    '7fs': 7,
+    '8fs': 8,
+    '9fs': 9,
+    '10fs': 10,
     'first': 1,
     '1st': 1,
     'second': 2,
